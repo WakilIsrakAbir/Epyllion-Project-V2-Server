@@ -36,6 +36,10 @@ try {
     // Orders API (paginated, fast)
     const ordersRoutes = require('./routes/orders');
     app.use('/api/orders', ordersRoutes);
+
+    // Dropdown Master Setup API
+    const dropdownRoutes = require('./routes/dropdowns');
+    app.use('/api/dropdowns', dropdownRoutes);
     
     // GridFS File Serving Route
     // Protected by authenticateToken

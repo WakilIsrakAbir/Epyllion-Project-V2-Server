@@ -7,6 +7,11 @@ const File = require('../models/File');
 const OrderDate = require('../models/OrderDate');
 const Order = require('../models/Order');
 const DeptValidOrders = require('../models/DeptValidOrders');
+const User = require('../models/User');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
+
+// Protect all upload and file endpoints with token authentication
+router.use(authenticateToken);
 
 // ১. Multer Setup - Disk Storage (memory bachanot jonno)
 const fs = require('fs');
@@ -164,10 +169,25 @@ router.get('/download/:filename', async (req, res) => {
 });
 
 // ==========================================
-// SUPER API: Clear Entire Database & All GridFS Files (Total Wipe)
+// SUPER API: Clear Entire Database & All GridFS Files (Total Wipe - Admin Only)
 // ==========================================
-router.delete('/clear-all-planning', async (req, res) => {
+router.delete('/clear-all-planning', requireAdmin, async (req, res) => {
     try {
+        const { adminPassword } = req.body;
+        if (!adminPassword) {
+            return res.status(400).json({ message: 'Admin password is required to clear planning data.' });
+        }
+
+        const adminUser = await User.findById(req.user._id).select('+password');
+        if (!adminUser) {
+            return res.status(404).json({ message: 'Admin user not found.' });
+        }
+
+        const isMatch = await adminUser.comparePassword(adminPassword);
+        if (!isMatch) {
+            return res.status(403).json({ message: 'Invalid admin password. Action aborted.' });
+        }
+
         // 1. OrderDate collection clear
         await OrderDate.deleteMany({});
 

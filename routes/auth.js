@@ -1,45 +1,8 @@
 const express = require('express');
 const router = express.Router();
-const bcrypt = require('bcryptjs'); // Password encrypt korar jonno
-const jwt = require('jsonwebtoken'); // Login token bananor jonno
-const User = require('../models/User'); // Amader User model
-
-// 1. REGISTER API (Notun User kholar jonno)
-// Endpoint: POST /api/auth/register
-router.post('/register', async (req, res) => {
-    try {
-        const { username, password, role, status, permissions } = req.body;
-
-        // Check korbo username age theke ache kina
-        const existingUser = await User.findOne({ username });
-        if (existingUser) {
-            return res.status(400).json({ message: "এই ইউজারনেমটি আগে থেকেই আছে! অন্য একটি চেষ্টা করুন।" });
-        }
-
-        // Password Hash (Encrypt) kora
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        // Notun User toiri kora
-        const newUser = new User({
-            username,
-            password: hashedPassword,
-            role: role || 'Viewer', // Default role Viewer
-            status: status || 'active',
-            permissions: permissions || {},
-            lastActive: Date.now(),
-            plainPassword: password
-        });
-
-        // Database e save kora
-        await newUser.save();
-        res.status(201).json({ message: "অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে!" });
-
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "সার্ভারে কোনো সমস্যা হয়েছে!" });
-    }
-});
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const { authenticateToken, requireAdmin } = require('../middleware/auth');
 
 // Calculate remaining seconds until 12:00 AM (midnight) in Bangladesh (UTC+6)
 function getSecondsUntilDhakaMidnight() {
@@ -60,27 +23,71 @@ function getSecondsUntilDhakaMidnight() {
     };
 }
 
-// 2. LOGIN API (Login korar jonno)
+// 1. REGISTER API (Admin Only)
+// Endpoint: POST /api/auth/register
+router.post('/register', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { username, password, role, status, permissions } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({ message: "ইউজারনেম এবং পাসওয়ার্ড উভয়ই আবশ্যক!" });
+        }
+
+        // Check if username already exists
+        const existingUser = await User.findOne({ username });
+        if (existingUser) {
+            return res.status(400).json({ message: "এই ইউজারনেমটি আগে থেকেই আছে! অন্য একটি চেষ্টা করুন।" });
+        }
+
+        // Password will be automatically hashed by User model pre-save hook
+        const newUser = new User({
+            username: username.trim(),
+            password,
+            role: role || 'Viewer',
+            status: status || 'active',
+            permissions: permissions || {},
+            lastActive: Date.now()
+        });
+
+        await newUser.save();
+        res.status(201).json({ message: "অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে!" });
+
+    } catch (error) {
+        console.error("Registration error:", error);
+        res.status(500).json({ message: "সার্ভারে কোনো সমস্যা হয়েছে!" });
+    }
+});
+
+// 2. LOGIN API
 // Endpoint: POST /api/auth/login
 router.post('/login', async (req, res) => {
     try {
         const { username, password } = req.body;
 
-        // User check kora
-        const user = await User.findOne({ username });
+        if (!username || !password) {
+            return res.status(400).json({ message: "ইউজারনেম এবং পাসওয়ার্ড প্রদান করুন।" });
+        }
+
+        // User check kora (explicitly select password because select: false is on schema)
+        const user = await User.findOne({ username }).select('+password');
         if (!user) {
             return res.status(400).json({ message: "এই নামে কোনো ইউজার পাওয়া যায়নি!" });
         }
 
-        // Password check kora (Hash er sathe melano)
-        const isMatch = await bcrypt.compare(password, user.password);
+        if (user.status === 'inactive') {
+            return res.status(403).json({ message: "আপনার অ্যাকাউন্টটি নিষ্ক্রিয় করা আছে। অনুগ্রহ করে অ্যাডমিনের সাথে যোগাযোগ করুন।" });
+        }
+
+        // Password check kora (compare using model method)
+        const isMatch = await user.comparePassword(password);
         if (!isMatch) {
             return res.status(400).json({ message: "পাসওয়ার্ড ভুল হয়েছে!" });
         }
 
-        // Token toiri kora - Protidin raat 12:00 AM e expire hobe
+        // Token toiri kora - Dhaka time 12:00 AM midnight e expire hobe
         const payload = {
             userId: user._id,
+            username: user.username,
             role: user.role
         };
 
@@ -91,12 +98,13 @@ router.post('/login', async (req, res) => {
         user.lastActive = Date.now();
         await user.save();
 
-        // Login success hole info pathano
+        // Login success hole info pathano (never expose passwords)
         res.status(200).json({
             message: "সফলভাবে লগইন হয়েছে!",
             token,
             sessionExpiresAt,
             user: {
+                id: user._id,
                 username: user.username,
                 role: user.role,
                 status: user.status,
@@ -105,75 +113,79 @@ router.post('/login', async (req, res) => {
         });
 
     } catch (error) {
-        console.error(error);
+        console.error("Login error:", error);
         res.status(500).json({ message: "সার্ভারে কোনো সমস্যা হয়েছে!" });
     }
 });
 
-// 3. GET ALL USERS API (To view the list of all users)
+// 3. GET ALL USERS API (Admin Only)
 // Endpoint: GET /api/auth/users
-router.get('/users', async (req, res) => {
+router.get('/users', authenticateToken, requireAdmin, async (req, res) => {
     try {
-        // Fetch all users from the database, but exclude their passwords for security
-        const users = await User.find().select('-password').lean();
+        // Password is automatically excluded by select: false on schema
+        const users = await User.find().lean();
         res.status(200).json(users);
     } catch (error) {
-        console.error(error);
+        console.error("Get users error:", error);
         res.status(500).json({ message: "Server error occurred!" });
     }
 });
 
-// 4. DELETE USER API (To delete a specific user)
+// 4. DELETE USER API (Admin Only)
 // Endpoint: DELETE /api/auth/user/:id
-router.delete('/user/:id', async (req, res) => {
+router.delete('/user/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const userId = req.params.id;
+
+        if (String(req.user._id) === String(userId)) {
+            return res.status(400).json({ message: "You cannot delete your own account!" });
+        }
+
         await User.findByIdAndDelete(userId);
         res.status(200).json({ message: "User deleted successfully!" });
     } catch (error) {
-        console.error(error);
+        console.error("Delete user error:", error);
         res.status(500).json({ message: "Failed to delete user!" });
     }
 });
 
-// 5. UPDATE USER API (To edit user profile and permissions)
+// 5. UPDATE USER API (Admin Only)
 // Endpoint: PUT /api/auth/user/:id
-router.put('/user/:id', async (req, res) => {
+router.put('/user/:id', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const userId = req.params.id;
         const { username, password, role, status, permissions } = req.body;
-        
-        let updateData = { role, status, permissions };
-        if (username) updateData.username = username;
 
-        if (password) {
-            const salt = await bcrypt.genSalt(10);
-            updateData.password = await bcrypt.hash(password, salt);
-            updateData.plainPassword = password;
+        const user = await User.findById(userId).select('+password');
+        if (!user) {
+            return res.status(404).json({ message: "User not found!" });
         }
 
-        await User.findByIdAndUpdate(userId, updateData, { returnDocument: 'after' });
+        if (username) user.username = username.trim();
+        if (role) user.role = role;
+        if (status) user.status = status;
+        if (permissions) user.permissions = permissions;
+
+        // If new password is provided, assign it; pre-save hook will hash it automatically
+        if (password && password.trim()) {
+            user.password = password;
+        }
+
+        await user.save();
         res.status(200).json({ message: "User updated successfully!" });
     } catch (error) {
-        console.error(error);
+        console.error("Update user error:", error);
         res.status(500).json({ message: "Failed to update user!" });
     }
 });
 
-// 6. HEARTBEAT API (To keep user active)
+// 6. HEARTBEAT API (Authenticated Users)
 // Endpoint: POST /api/auth/heartbeat
-router.post('/heartbeat', async (req, res) => {
+router.post('/heartbeat', authenticateToken, async (req, res) => {
     try {
-        const token = req.headers.authorization?.split(" ")[1];
-        if (!token) return res.status(401).json({ message: "No token provided" });
-        
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        await User.findByIdAndUpdate(decoded.userId, { lastActive: Date.now() });
+        await User.findByIdAndUpdate(req.user._id, { lastActive: Date.now() });
         res.status(200).json({ message: "Active status updated" });
     } catch (error) {
-        if (error.name === 'TokenExpiredError') {
-            return res.status(401).json({ message: "Token expired, please login again" });
-        }
         console.error("Heartbeat error:", error.message);
         res.status(500).json({ message: "Failed to update heartbeat" });
     }

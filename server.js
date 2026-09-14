@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const compression = require('compression');
+const { authenticateToken } = require('./middleware/auth');
 require('dotenv').config();
 
 const app = express();
@@ -37,14 +38,13 @@ try {
     app.use('/api/orders', ordersRoutes);
     
     // GridFS File Serving Route
-    // Ager express.static('uploads') er bodole ekhon GridFS theke file serve hobe
-    // Frontend er URL pattern same thakbe: /uploads/filename.xlsx
+    // Protected by authenticateToken
     let serverGfsBucket;
     mongoose.connection.on('connected', () => {
         serverGfsBucket = null;
     });
 
-    app.get('/uploads/:filename', async (req, res) => {
+    app.get('/uploads/:filename', authenticateToken, async (req, res) => {
         try {
             if (mongoose.connection.readyState !== 1) {
                 return res.status(503).json({ message: 'Database not ready' });

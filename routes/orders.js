@@ -3,22 +3,77 @@ const router = express.Router();
 const Order = require("../models/Order");
 const OrderDate = require("../models/OrderDate");
 const DeptValidOrders = require("../models/DeptValidOrders");
+const { authenticateToken } = require("../middleware/auth");
+
+// Protect all order endpoints with JWT authentication
+router.use(authenticateToken);
+
+// Middleware to enforce buyer permissions strictly on the server-side
+router.use(async (req, res, next) => {
+  try {
+    // 1. Admin users have unrestricted access across all buyers
+    if (req.user && req.user.role === "Admin") {
+      // Optional: Admin can still filter by allowedBuyers query param for UI views
+      if (req.query.allowedBuyers) {
+        if (req.query.allowedBuyers === "NONE_ASSIGNED") {
+          req.allowedRawBuyers = ["_NONE_"];
+        } else {
+          const ids = req.query.allowedBuyers.split(",").filter((x) => x.trim());
+          if (ids.length > 0) {
+            const rawBuyers = await Order.distinct("buyer");
+            const allowedNames = rawBuyers.filter((b) => {
+              const id = String(b).toLowerCase().replace(/[^a-z0-9]/g, "");
+              return ids.includes(id);
+            });
+            req.allowedRawBuyers = allowedNames.length > 0 ? allowedNames : ["_NONE_"];
+          }
+        }
+      }
+      return next();
+    }
+
+    // 2. Non-Admin users: STRICT server-side enforcement from req.user.permissions.buyers
+    const buyerPerms = req.user?.permissions?.buyers;
+    if (!buyerPerms || buyerPerms.accessType === "all") {
+      req.allowedRawBuyers = undefined; // All buyers allowed
+    } else if (buyerPerms.accessType === "none" || !buyerPerms.buyerIds || buyerPerms.buyerIds.length === 0) {
+      req.allowedRawBuyers = ["_NONE_"];
+    } else {
+      // accessType === "selected"
+      const rawBuyers = await Order.distinct("buyer");
+      const allowedNames = rawBuyers.filter((b) => {
+        const id = String(b).toLowerCase().replace(/[^a-z0-9]/g, "");
+        return buyerPerms.buyerIds.includes(id);
+      });
+      req.allowedRawBuyers = allowedNames.length > 0 ? allowedNames : ["_NONE_"];
+    }
+  } catch (e) {
+    console.error("Error processing allowed buyers middleware:", e);
+    req.allowedRawBuyers = ["_NONE_"];
+  }
+  next();
+});
 
 // ==========================================================
-// GET /api/orders/buyers — Fetch all unique buyer names
+// GET /api/orders/buyers — Fetch all unique buyer names (filtered by permissions)
 // ==========================================================
 router.get("/buyers", async (req, res) => {
   try {
-    const rawBuyers = await Order.distinct("buyer");
-    const buyers = rawBuyers
-      .map((b) => (b ? String(b).trim() : ""))
-      .filter(
-        (b) =>
-          b &&
-          b.toUpperCase() !== "UNDEFINED" &&
-          b.toUpperCase() !== "N/A" &&
-          b.toUpperCase() !== "GENERAL",
-      );
+    let buyers;
+    if (req.allowedRawBuyers) {
+      buyers = req.allowedRawBuyers.filter((b) => b && b !== "_NONE_");
+    } else {
+      const rawBuyers = await Order.distinct("buyer");
+      buyers = rawBuyers
+        .map((b) => (b ? String(b).trim() : ""))
+        .filter(
+          (b) =>
+            b &&
+            b.toUpperCase() !== "UNDEFINED" &&
+            b.toUpperCase() !== "N/A" &&
+            b.toUpperCase() !== "GENERAL",
+        );
+    }
     // Sort buyers alphabetically
     buyers.sort((a, b) => a.localeCompare(b));
     res.json(buyers);
@@ -26,33 +81,6 @@ router.get("/buyers", async (req, res) => {
     console.error("Error fetching buyers:", error);
     res.status(500).json({ message: "Failed to fetch buyers." });
   }
-});
-
-// Middleware to process allowed buyers globally for all subsequent GET requests
-router.use(async (req, res, next) => {
-  if (req.method === "GET" && req.query.allowedBuyers) {
-    if (req.query.allowedBuyers === "NONE_ASSIGNED") {
-      req.allowedRawBuyers = ["_NONE_"];
-    } else {
-      const ids = req.query.allowedBuyers.split(",").filter((x) => x.trim());
-      if (ids.length > 0) {
-        try {
-          const rawBuyers = await Order.distinct("buyer");
-          const allowedNames = rawBuyers.filter((b) => {
-            const id = String(b)
-              .toLowerCase()
-              .replace(/[^a-z0-9]/g, "");
-            return ids.includes(id);
-          });
-          req.allowedRawBuyers =
-            allowedNames.length > 0 ? allowedNames : ["_NONE_"];
-        } catch (e) {
-          console.error("Error processing allowedBuyers in middleware", e);
-        }
-      }
-    }
-  }
-  next();
 });
 
 // ==========================================
@@ -147,7 +175,8 @@ router.get("/", async (req, res) => {
       if (filter.buyer) {
         filter.$and = filter.$and || [];
         filter.$and.push({ buyer: filter.buyer });
-        filter.buyer = { $in: req.allowedRawBuyers };
+        filter.$and.push({ buyer: { $in: req.allowedRawBuyers } });
+        delete filter.buyer;
       } else {
         filter.buyer = { $in: req.allowedRawBuyers };
       }
@@ -401,8 +430,11 @@ router.get("/tracking/:dept", async (req, res) => {
       if (orderFilter.buyer) {
         orderFilter.$and = orderFilter.$and || [];
         orderFilter.$and.push({ buyer: orderFilter.buyer });
+        orderFilter.$and.push({ buyer: { $in: req.allowedRawBuyers } });
+        delete orderFilter.buyer;
+      } else {
+        orderFilter.buyer = { $in: req.allowedRawBuyers };
       }
-      orderFilter.buyer = { $in: req.allowedRawBuyers };
     }
 
     const confirmedOrders = await Order.find(orderFilter, {

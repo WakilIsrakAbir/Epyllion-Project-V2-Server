@@ -2,7 +2,15 @@ const express = require('express');
 const router = express.Router();
 const DropdownMaster = require('../models/DropdownMaster');
 const OrderDate = require('../models/OrderDate');
-const { authenticateToken, requireAdmin } = require('../middleware/auth');
+const { authenticateToken } = require('../middleware/auth');
+
+// Allow Admin OR users granted Setup permission in User Management
+const requireSetupPermission = (req, res, next) => {
+    if (req.user && (req.user.role === 'Admin' || req.user.permissions?.menus?.dataManagement?.setup)) {
+        return next();
+    }
+    return res.status(403).json({ message: 'Access forbidden: Setup privileges required.' });
+};
 
 // Default initial master options
 const DEFAULT_UNITS = ['EFL', 'EKL', 'Ext', 'Outside'];
@@ -57,7 +65,7 @@ router.get('/', async (req, res) => {
 // 2. ADD NEW DROPDOWN ITEM (Admin Only)
 // Endpoint: POST /api/dropdowns
 // ==========================================
-router.post('/', requireAdmin, async (req, res) => {
+router.post('/', requireSetupPermission, async (req, res) => {
     try {
         const { type, name } = req.body;
 
@@ -108,7 +116,7 @@ router.post('/', requireAdmin, async (req, res) => {
 // 3. EDIT DROPDOWN ITEM (Admin Only)
 // Endpoint: PUT /api/dropdowns/:id
 // ==========================================
-router.put('/:id', requireAdmin, async (req, res) => {
+router.put('/:id', requireSetupPermission, async (req, res) => {
     try {
         const { id } = req.params;
         const { name, status } = req.body;
@@ -152,7 +160,7 @@ router.put('/:id', requireAdmin, async (req, res) => {
 // Endpoint: DELETE /api/dropdowns/:id
 // Safety rule: If used in existing OrderDate records, mark HIDDEN instead of deleting.
 // ==========================================
-router.delete('/:id', requireAdmin, async (req, res) => {
+router.delete('/:id', requireSetupPermission, async (req, res) => {
     try {
         const { id } = req.params;
 

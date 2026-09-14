@@ -95,8 +95,7 @@ router.post('/login', async (req, res) => {
         const token = jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: expiresInSeconds });
 
         // Update lastActive
-        user.lastActive = Date.now();
-        await user.save();
+        await User.findByIdAndUpdate(user._id, { lastActive: Date.now() });
 
         // Login success hole info pathano (never expose passwords)
         res.status(200).json({

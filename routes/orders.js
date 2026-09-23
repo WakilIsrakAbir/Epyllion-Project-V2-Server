@@ -746,15 +746,19 @@ router.get("/tracking/:dept", async (req, res) => {
     const paginatedOrderNos = paginatedInfo.map((p) => p.orderNo);
     let paginatedDocs = [];
     if (paginatedOrderNos.length > 0) {
+      const projection = {
+        orderNo: 1,
+        [dbDept]: 1,
+        [`${dbDept}Status`]: 1,
+        [`${dbDept}CompletedDate`]: 1,
+        [actualField]: 1,
+      };
+      if (dept === "dyeing" || dept === "delivery" || dept === "deliveryfloor") {
+        projection.dyeing = 1;
+      }
       paginatedDocs = await OrderDate.find(
         { orderNo: { $in: paginatedOrderNos } },
-        {
-          orderNo: 1,
-          [dbDept]: 1,
-          [`${dbDept}Status`]: 1,
-          [`${dbDept}CompletedDate`]: 1,
-          [actualField]: 1,
-        },
+        projection,
       ).lean();
     }
 
@@ -768,17 +772,34 @@ router.get("/tracking/:dept", async (req, res) => {
 
     // Fetch uploaded items to populate dates for orders that only exist in Order collection
     // (i.e., OrderDate has no dept array for them)
+    const orderProjection = { orderNo: 1, [`${dbDept}Items`]: 1 };
+    if (dept === "delivery" || dept === "deliveryfloor") {
+      orderProjection.dyeingItems = 1;
+    }
     const paginatedOrders = await Order.find(
       { orderNo: { $in: paginatedOrderNos } },
-      { orderNo: 1, [`${dbDept}Items`]: 1 },
+      orderProjection,
     ).lean();
     const paginatedOrdersMap = {};
+    const paginatedDyeingOrdersMap = {};
     paginatedOrders.forEach((o) => {
       paginatedOrdersMap[o.orderNo] = o[`${dbDept}Items`] || [];
+      if (dept === "delivery" || dept === "deliveryfloor") {
+        paginatedDyeingOrdersMap[o.orderNo] = o.dyeingItems || [];
+      }
     });
 
     paginatedDocs.forEach((doc) => {
       doc.uploadedItems = paginatedOrdersMap[doc.orderNo] || [];
+      if (dept === "delivery" || dept === "deliveryfloor") {
+        if (!doc.dyeing || doc.dyeing.length === 0) {
+          const rawDyeing = paginatedDyeingOrdersMap[doc.orderNo] || [];
+          if (rawDyeing.length > 0) {
+            doc.dyeing = rawDyeing.map((raw) => ({ itemData: raw }));
+          }
+        }
+      }
+
       if (!doc[dbDept] || doc[dbDept].length === 0) {
         const rawItems = paginatedOrdersMap[doc.orderNo] || [];
         doc[dbDept] = rawItems.map((raw) => {
@@ -817,6 +838,67 @@ router.get("/tracking/:dept", async (req, res) => {
         });
       }
     });
+
+    // Populate unit and processName for dyeing, delivery, and deliveryfloor
+    if (dept === "dyeing" || dept === "delivery" || dept === "deliveryfloor") {
+      const invalidStrings = new Set(["", "-", "n/a", "select", "null", "undefined"]);
+      paginatedDocs.forEach((doc) => {
+        const dyeingItems = doc.dyeing && doc.dyeing.length > 0
+          ? doc.dyeing
+          : (paginatedDyeingOrdersMap[doc.orderNo] || []).map((r) => ({ itemData: r }));
+        const units = [];
+        const processes = [];
+
+        dyeingItems.forEach((it) => {
+          const d = it.itemData || it;
+          const u =
+            d.Unit !== undefined && d.Unit !== null
+              ? String(d.Unit).trim()
+              : it.Unit !== undefined && it.Unit !== null
+              ? String(it.Unit).trim()
+              : "";
+          if (u) {
+            u.split("+")
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .forEach((part) => {
+                if (
+                  !invalidStrings.has(part.toLowerCase()) &&
+                  !units.includes(part)
+                ) {
+                  units.push(part);
+                }
+              });
+          }
+
+          const p =
+            d.ProcessName ||
+            d["Process Name"] ||
+            d.Process ||
+            it.ProcessName ||
+            it["Process Name"] ||
+            "";
+          if (p) {
+            String(p)
+              .trim()
+              .split("+")
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .forEach((part) => {
+                if (
+                  !invalidStrings.has(part.toLowerCase()) &&
+                  !processes.includes(part)
+                ) {
+                  processes.push(part);
+                }
+              });
+          }
+        });
+
+        doc.unit = units.join("+");
+        doc.processName = processes.join("+");
+      });
+    }
 
     // Ensure the paginatedDocs are in the same sorted order as paginatedInfo
     const finalPaginatedDocs = [];

@@ -972,18 +972,19 @@ function normalizeItemRow(rawItem, dept) {
         "Fabric",
       ]),
       GSM: getField(["GSM", "G.S.M"]),
-      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty"]),
-      Allowance: getField(["Allowance %", "Allowance"]),
-      YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req"]),
-      AllocatedQty: getField(["Allocated Qty", "AllocatedQty"]),
-      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala"]),
+      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty", "Order Qty"]),
+      Allowance: getField(["Allowance %", "Allowance", "Wastage %", "Wastage", "Allow %", "Allow"]),
+      YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req", "Yarn Req."]),
+      AllocatedQty: getField(["Allocated Qty", "Allocated Qty ", "AllocatedQty", "Alloc Qty"]),
+      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala", "Yarn Balance"]),
       GreyReq: getField(["Grey Req.", "GreyReq", "Grey Req"]),
-      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod"]),
+      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod", "Knit Production"]),
       KnitBala: getField([
         "Knit. Bala.",
         "KnitBala",
         "Knit Bala.",
         "Knit Bala",
+        "Knit. Bal.",
       ]),
       NetReceivedQtyKgs: getField([
         "NetReceivedQtyKgs",
@@ -1004,10 +1005,10 @@ function normalizeItemRow(rawItem, dept) {
       ]),
       RFD: getField(["RFD"]),
       Slowmoving: getField(["Slowmoving"]),
-      FFStock: getField(["FF Stock", "FFStock"]),
-      BPQty: getField(["BP Qty", "BPQty"]),
-      DyeingProd: getField(["Dyeing Prod.", "DyeingProd", "Dyeing Prod"]),
-      DyeingBala: getField(["Dyeing Bala.", "DyeingBala", "Dyeing Bala"]),
+      FFStock: getField(["FF Stock", "FFStock", "FF_Stock"]),
+      BPQty: getField(["BP Qty", "BPQty", "BP_Qty"]),
+      DyeingProd: getField(["Dyeing Prod.", "DyeingProd", "Dyeing Prod", "Dyeing ok", "Dyeing Production"]),
+      DyeingBala: getField(["Dyeing Bala.", "DyeingBala", "Dyeing Bala", "Dyeing Bal."]),
     };
   } else if (dept === "knitting") {
     return {
@@ -1028,19 +1029,40 @@ function normalizeItemRow(rawItem, dept) {
         "Fabric",
       ]),
       GSM: getField(["GSM", "G.S.M"]),
-      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty"]),
-      Allowance: getField(["Allowance %", "Allowance"]),
-      YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req"]),
-      AllocatedQty: getField(["Allocated Qty", "AllocatedQty"]),
-      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala"]),
+      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty", "Order Qty"]),
+      Allowance: getField(["Allowance %", "Allowance", "Wastage %", "Wastage", "Allow %", "Allow"]),
+      YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req", "Yarn Req."]),
+      AllocatedQty: getField(["Allocated Qty", "Allocated Qty ", "AllocatedQty", "Alloc Qty"]),
+      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala", "Yarn Balance"]),
       GreyReq: getField(["Grey Req.", "GreyReq", "Grey Req"]),
-      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod"]),
+      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod", "Knit Production"]),
       KnitBala: getField([
         "Knit. Bala.",
         "KnitBala",
         "Knit Bala.",
         "Knit Bala",
+        "Knit. Bal.",
       ]),
+      NetReceivedQtyKgs: getField([
+        "NetReceivedQtyKgs",
+        "NetReceivedQty",
+        "ReceivedQty",
+      ]),
+      NetDeliveryQtyKgs: getField([
+        "NetDeliveryQtyKgs",
+        "NetDeliveryQty",
+        "DeliveryQty",
+      ]),
+      DeliBal: getField([
+        "Deli. Bal.",
+        "Deli Bal.",
+        "DeliBal",
+        "Delivery Balance",
+        "Deli. Bala.",
+      ]),
+      RFD: getField(["RFD"]),
+      Slowmoving: getField(["Slowmoving"]),
+      FFStock: getField(["FF Stock", "FFStock", "FF_Stock"]),
     };
   } else if (dept === "dyeing" || dept === "finishing") {
     return {
@@ -1053,21 +1075,26 @@ function normalizeItemRow(rawItem, dept) {
         "Booking No",
       ]),
       Color: getField(["Color", "Colour", "Fab Color"]),
-      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty"]),
+      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty", "Order Qty"]),
       Buyer: getField(["Buyer", "BuyerName", "Customer"]),
       Unit: getField(["Unit"]),
       ProcessName: getField(["Process Name", "ProcessName", "Process"]),
+      Allowance: getField(["Allowance %", "Allowance", "Wastage %", "Wastage", "Allow %", "Allow"]),
+      YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req", "Yarn Req."]),
+      AllocatedQty: getField(["Allocated Qty", "Allocated Qty ", "AllocatedQty", "Alloc Qty"]),
+      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala", "Yarn Balance"]),
       GreyReq: getField(["Grey Req.", "GreyReq", "Grey Req"]),
-      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod"]),
+      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod", "Knit Production"]),
       KnitBala: getField([
         "Knit. Bala.",
         "KnitBala",
         "Knit Bala.",
         "Knit Bala",
+        "Knit. Bal.",
       ]),
-      BPQty: getField(["BP Qty", "BPQty"]),
-      DyeingProd: getField(["Dyeing Prod.", "DyeingProd", "Dyeing Prod"]),
-      DyeingBala: getField(["Dyeing Bala.", "DyeingBala", "Dyeing Bala"]),
+      BPQty: getField(["BP Qty", "BPQty", "BP_Qty"]),
+      DyeingProd: getField(["Dyeing Prod.", "DyeingProd", "Dyeing Prod", "Dyeing ok", "Dyeing Production"]),
+      DyeingBala: getField(["Dyeing Bala.", "DyeingBala", "Dyeing Bala", "Dyeing Bal."]),
       NetReceivedQtyKgs: getField([
         "NetReceivedQtyKgs",
         "NetReceivedQty",
@@ -1078,9 +1105,16 @@ function normalizeItemRow(rawItem, dept) {
         "NetDeliveryQty",
         "DeliveryQty",
       ]),
+      DeliBal: getField([
+        "Deli. Bal.",
+        "Deli Bal.",
+        "DeliBal",
+        "Delivery Balance",
+        "Deli. Bala.",
+      ]),
       RFD: getField(["RFD"]),
       Slowmoving: getField(["Slowmoving"]),
-      FFStock: getField(["FF Stock", "FFStock"]),
+      FFStock: getField(["FF Stock", "FFStock", "FF_Stock"]),
     };
   } else if (dept === "yd") {
     return {
@@ -1186,6 +1220,19 @@ router.get("/report-download/:dept", async (req, res) => {
     for (let i = 0; i < orderNos.length; i += chunkSize) {
       const chunkOrderNos = orderNos.slice(i, i + chunkSize);
 
+      const orderItemProjection = { orderNo: 1 };
+      if (dept === "knitting") {
+        orderItemProjection.knittingItems = 1;
+      } else if (dept === "dyeing") {
+        orderItemProjection.dyeingItems = 1;
+        orderItemProjection.knittingItems = 1;
+        orderItemProjection.deliveryItems = 1;
+      } else if (dept === "delivery") {
+        orderItemProjection.deliveryItems = 1;
+        orderItemProjection.knittingItems = 1;
+        orderItemProjection.dyeingItems = 1;
+      }
+
       const [planDocsChunk, orderItemsDocs] = await Promise.all([
         OrderDate.find(
           {
@@ -1194,84 +1241,224 @@ router.get("/report-download/:dept", async (req, res) => {
           },
           planProjection,
         ).lean(),
-        dept === "knitting"
+        ["knitting", "dyeing", "delivery"].includes(dept)
           ? Order.find(
               { orderNo: { $in: chunkOrderNos } },
-              { orderNo: 1, knittingItems: 1 },
+              orderItemProjection,
             ).lean()
           : Promise.resolve([]),
       ]);
 
       const orderItemsMap = {};
-      if (dept === "knitting") {
-        orderItemsDocs.forEach((d) => {
-          orderItemsMap[d.orderNo] = d.knittingItems || [];
-        });
-      }
+      const orderKnitMap = {};
+      const orderDyeMap = {};
+      const orderDeliMap = {};
+      orderItemsDocs.forEach((d) => {
+        if (d.knittingItems) orderKnitMap[d.orderNo] = d.knittingItems;
+        if (d.dyeingItems) orderDyeMap[d.orderNo] = d.dyeingItems;
+        if (d.deliveryItems) orderDeliMap[d.orderNo] = d.deliveryItems;
+        if (dept === "knitting") orderItemsMap[d.orderNo] = d.knittingItems || [];
+        else if (dept === "dyeing") orderItemsMap[d.orderNo] = d.dyeingItems || [];
+        else if (dept === "delivery") orderItemsMap[d.orderNo] = d.deliveryItems || [];
+      });
 
       planDocsChunk.forEach((plan) => {
         planDocOrderNos.add(plan.orderNo);
         const items = plan[dept] || [];
 
-        let latestNormItems = [];
-        if (dept === "knitting") {
-          const latestItems = orderItemsMap[plan.orderNo] || [];
-          latestNormItems = latestItems.map((li) => normalizeItemRow(li, dept));
-        }
+        const latestItems = orderItemsMap[plan.orderNo] || [];
+        const latestNormItems = latestItems.map((li) => normalizeItemRow(li, dept));
+        const knitNormItems = (orderKnitMap[plan.orderNo] || []).map((li) => normalizeItemRow(li, "knitting"));
+        const dyeNormItems = (orderDyeMap[plan.orderNo] || []).map((li) => normalizeItemRow(li, "dyeing"));
+        const deliNormItems = (orderDeliMap[plan.orderNo] || []).map((li) => normalizeItemRow(li, "delivery"));
 
         items.forEach((item) => {
           let row = normalizeItemRow(item.itemData || {}, dept);
 
-          if (dept === "knitting") {
-            const myColor = String(row.Color || "")
-              .trim()
-              .toLowerCase();
-            const myConst = String(row.FabricConstruction || "")
-              .trim()
-              .toLowerCase();
-            const myGSM = String(row.GSM || "")
-              .trim()
-              .toLowerCase();
+          const myColor = String(row.Color || "").trim().toLowerCase();
+          const myConst = String(row.FabricConstruction || "").trim().toLowerCase();
+          const myGSM = String(row.GSM || "").trim().toLowerCase();
+          const myProcess = String(row.ProcessName || "").trim().toLowerCase();
 
+          if (dept === "knitting") {
             const latestMatch = latestNormItems.find(
               (ln) =>
-                String(ln.Color || "")
-                  .trim()
-                  .toLowerCase() === myColor &&
-                String(ln.FabricConstruction || "")
-                  .trim()
-                  .toLowerCase() === myConst &&
-                String(ln.GSM || "")
-                  .trim()
-                  .toLowerCase() === myGSM,
+                String(ln.Color || "").trim().toLowerCase() === myColor &&
+                String(ln.FabricConstruction || "").trim().toLowerCase() === myConst &&
+                String(ln.GSM || "").trim().toLowerCase() === myGSM,
+            ) || latestNormItems.find(
+              (ln) => String(ln.Color || "").trim().toLowerCase() === myColor,
             );
 
             if (latestMatch) {
-              if (
-                latestMatch.KnitBala !== undefined &&
-                latestMatch.KnitBala !== ""
-              )
-                row.KnitBala = latestMatch.KnitBala;
-              if (
-                latestMatch.KnitProd !== undefined &&
-                latestMatch.KnitProd !== ""
-              )
-                row.KnitProd = latestMatch.KnitProd;
-              if (
-                latestMatch.GreyReq !== undefined &&
-                latestMatch.GreyReq !== ""
-              )
-                row.GreyReq = latestMatch.GreyReq;
-              if (
-                latestMatch.AllocatedQty !== undefined &&
-                latestMatch.AllocatedQty !== ""
-              )
+              if (latestMatch.Allowance !== undefined && latestMatch.Allowance !== "")
+                row.Allowance = latestMatch.Allowance;
+              if (latestMatch.YarnReq !== undefined && latestMatch.YarnReq !== "")
+                row.YarnReq = latestMatch.YarnReq;
+              if (latestMatch.AllocatedQty !== undefined && latestMatch.AllocatedQty !== "")
                 row.AllocatedQty = latestMatch.AllocatedQty;
-              if (
-                latestMatch.YarnBala !== undefined &&
-                latestMatch.YarnBala !== ""
-              )
+              if (latestMatch.YarnBala !== undefined && latestMatch.YarnBala !== "")
                 row.YarnBala = latestMatch.YarnBala;
+              if (latestMatch.GreyReq !== undefined && latestMatch.GreyReq !== "")
+                row.GreyReq = latestMatch.GreyReq;
+              if (latestMatch.KnitProd !== undefined && latestMatch.KnitProd !== "")
+                row.KnitProd = latestMatch.KnitProd;
+              if (latestMatch.KnitBala !== undefined && latestMatch.KnitBala !== "")
+                row.KnitBala = latestMatch.KnitBala;
+              if (latestMatch.RequiredQtyKgs !== undefined && latestMatch.RequiredQtyKgs !== "")
+                row.RequiredQtyKgs = latestMatch.RequiredQtyKgs;
+              if (latestMatch.NetReceivedQtyKgs !== undefined && latestMatch.NetReceivedQtyKgs !== "")
+                row.NetReceivedQtyKgs = latestMatch.NetReceivedQtyKgs;
+              if (latestMatch.NetDeliveryQtyKgs !== undefined && latestMatch.NetDeliveryQtyKgs !== "")
+                row.NetDeliveryQtyKgs = latestMatch.NetDeliveryQtyKgs;
+              if (latestMatch.DeliBal !== undefined && latestMatch.DeliBal !== "")
+                row.DeliBal = latestMatch.DeliBal;
+              if (latestMatch.RFD !== undefined && latestMatch.RFD !== "")
+                row.RFD = latestMatch.RFD;
+              if (latestMatch.Slowmoving !== undefined && latestMatch.Slowmoving !== "")
+                row.Slowmoving = latestMatch.Slowmoving;
+              if (latestMatch.FFStock !== undefined && latestMatch.FFStock !== "")
+                row.FFStock = latestMatch.FFStock;
+            }
+          } else if (dept === "dyeing") {
+            const latestMatch = latestNormItems.find(
+              (ln) =>
+                String(ln.Color || "").trim().toLowerCase() === myColor &&
+                myProcess && String(ln.ProcessName || "").trim().toLowerCase() === myProcess,
+            ) || latestNormItems.find(
+              (ln) => String(ln.Color || "").trim().toLowerCase() === myColor,
+            );
+
+            if (latestMatch) {
+              if (latestMatch.KnitProd !== undefined && latestMatch.KnitProd !== "")
+                row.KnitProd = latestMatch.KnitProd;
+              if (latestMatch.KnitBala !== undefined && latestMatch.KnitBala !== "")
+                row.KnitBala = latestMatch.KnitBala;
+              if (latestMatch.BPQty !== undefined && latestMatch.BPQty !== "")
+                row.BPQty = latestMatch.BPQty;
+              if (latestMatch.DyeingProd !== undefined && latestMatch.DyeingProd !== "")
+                row.DyeingProd = latestMatch.DyeingProd;
+              if (latestMatch.DyeingBala !== undefined && latestMatch.DyeingBala !== "")
+                row.DyeingBala = latestMatch.DyeingBala;
+              if (latestMatch.GreyReq !== undefined && latestMatch.GreyReq !== "")
+                row.GreyReq = latestMatch.GreyReq;
+              if (latestMatch.NetReceivedQtyKgs !== undefined && latestMatch.NetReceivedQtyKgs !== "")
+                row.NetReceivedQtyKgs = latestMatch.NetReceivedQtyKgs;
+              if (latestMatch.NetDeliveryQtyKgs !== undefined && latestMatch.NetDeliveryQtyKgs !== "")
+                row.NetDeliveryQtyKgs = latestMatch.NetDeliveryQtyKgs;
+              if (latestMatch.RFD !== undefined && latestMatch.RFD !== "")
+                row.RFD = latestMatch.RFD;
+              if (latestMatch.Slowmoving !== undefined && latestMatch.Slowmoving !== "")
+                row.Slowmoving = latestMatch.Slowmoving;
+              if (latestMatch.FFStock !== undefined && latestMatch.FFStock !== "")
+                row.FFStock = latestMatch.FFStock;
+              if (latestMatch.RequiredQtyKgs !== undefined && latestMatch.RequiredQtyKgs !== "")
+                row.RequiredQtyKgs = latestMatch.RequiredQtyKgs;
+              if (latestMatch.Unit && latestMatch.Unit !== "")
+                row.Unit = latestMatch.Unit;
+              if (latestMatch.ProcessName && latestMatch.ProcessName !== "")
+                row.ProcessName = latestMatch.ProcessName;
+            }
+
+            // Cross-populate Allowance, YarnReq, AllocatedQty, YarnBala from Knitting if available
+            const knitMatch = knitNormItems.find(
+              (kn) => String(kn.Color || "").trim().toLowerCase() === myColor,
+            );
+            if (knitMatch) {
+              if ((row.Allowance === undefined || row.Allowance === "") && knitMatch.Allowance !== undefined && knitMatch.Allowance !== "")
+                row.Allowance = knitMatch.Allowance;
+              if ((row.YarnReq === undefined || row.YarnReq === "") && knitMatch.YarnReq !== undefined && knitMatch.YarnReq !== "")
+                row.YarnReq = knitMatch.YarnReq;
+              if ((row.AllocatedQty === undefined || row.AllocatedQty === "") && knitMatch.AllocatedQty !== undefined && knitMatch.AllocatedQty !== "")
+                row.AllocatedQty = knitMatch.AllocatedQty;
+              if ((row.YarnBala === undefined || row.YarnBala === "") && knitMatch.YarnBala !== undefined && knitMatch.YarnBala !== "")
+                row.YarnBala = knitMatch.YarnBala;
+            }
+
+            // Cross-populate DeliBal from Delivery or calculate
+            const deliMatch = deliNormItems.find(
+              (dn) => String(dn.Color || "").trim().toLowerCase() === myColor,
+            );
+            if (deliMatch && deliMatch.DeliBal !== undefined && deliMatch.DeliBal !== "") {
+              row.DeliBal = deliMatch.DeliBal;
+            } else if (row.DeliBal === undefined || row.DeliBal === "") {
+              const req = Number(row.RequiredQtyKgs) || 0;
+              const del = Number(row.NetDeliveryQtyKgs) || 0;
+              if (req > 0) row.DeliBal = req - del;
+            }
+          } else if (dept === "delivery") {
+            const latestMatch = latestNormItems.find(
+              (ln) =>
+                String(ln.Color || "").trim().toLowerCase() === myColor &&
+                String(ln.FabricConstruction || "").trim().toLowerCase() === myConst &&
+                String(ln.GSM || "").trim().toLowerCase() === myGSM,
+            ) || latestNormItems.find(
+              (ln) => String(ln.Color || "").trim().toLowerCase() === myColor,
+            );
+
+            if (latestMatch) {
+              if (latestMatch.Allowance !== undefined && latestMatch.Allowance !== "")
+                row.Allowance = latestMatch.Allowance;
+              if (latestMatch.YarnReq !== undefined && latestMatch.YarnReq !== "")
+                row.YarnReq = latestMatch.YarnReq;
+              if (latestMatch.AllocatedQty !== undefined && latestMatch.AllocatedQty !== "")
+                row.AllocatedQty = latestMatch.AllocatedQty;
+              if (latestMatch.YarnBala !== undefined && latestMatch.YarnBala !== "")
+                row.YarnBala = latestMatch.YarnBala;
+              if (latestMatch.GreyReq !== undefined && latestMatch.GreyReq !== "")
+                row.GreyReq = latestMatch.GreyReq;
+              if (latestMatch.KnitProd !== undefined && latestMatch.KnitProd !== "")
+                row.KnitProd = latestMatch.KnitProd;
+              if (latestMatch.KnitBala !== undefined && latestMatch.KnitBala !== "")
+                row.KnitBala = latestMatch.KnitBala;
+              if (latestMatch.NetReceivedQtyKgs !== undefined && latestMatch.NetReceivedQtyKgs !== "")
+                row.NetReceivedQtyKgs = latestMatch.NetReceivedQtyKgs;
+              if (latestMatch.NetDeliveryQtyKgs !== undefined && latestMatch.NetDeliveryQtyKgs !== "")
+                row.NetDeliveryQtyKgs = latestMatch.NetDeliveryQtyKgs;
+              if (latestMatch.DeliBal !== undefined && latestMatch.DeliBal !== "")
+                row.DeliBal = latestMatch.DeliBal;
+              if (latestMatch.RFD !== undefined && latestMatch.RFD !== "")
+                row.RFD = latestMatch.RFD;
+              if (latestMatch.Slowmoving !== undefined && latestMatch.Slowmoving !== "")
+                row.Slowmoving = latestMatch.Slowmoving;
+              if (latestMatch.FFStock !== undefined && latestMatch.FFStock !== "")
+                row.FFStock = latestMatch.FFStock;
+              if (latestMatch.RequiredQtyKgs !== undefined && latestMatch.RequiredQtyKgs !== "")
+                row.RequiredQtyKgs = latestMatch.RequiredQtyKgs;
+            }
+
+            // Cross-populate BPQty, DyeingProd, DyeingBala from Dyeing items
+            const dyeMatch = dyeNormItems.find(
+              (dn) => String(dn.Color || "").trim().toLowerCase() === myColor,
+            );
+            if (dyeMatch) {
+              if (dyeMatch.BPQty !== undefined && dyeMatch.BPQty !== "")
+                row.BPQty = dyeMatch.BPQty;
+              if (dyeMatch.DyeingProd !== undefined && dyeMatch.DyeingProd !== "")
+                row.DyeingProd = dyeMatch.DyeingProd;
+              if (dyeMatch.DyeingBala !== undefined && dyeMatch.DyeingBala !== "")
+                row.DyeingBala = dyeMatch.DyeingBala;
+            }
+
+            // Cross-populate knitting items if missing
+            const knitMatch = knitNormItems.find(
+              (kn) => String(kn.Color || "").trim().toLowerCase() === myColor,
+            );
+            if (knitMatch) {
+              if ((row.Allowance === undefined || row.Allowance === "") && knitMatch.Allowance !== undefined && knitMatch.Allowance !== "")
+                row.Allowance = knitMatch.Allowance;
+              if ((row.YarnReq === undefined || row.YarnReq === "") && knitMatch.YarnReq !== undefined && knitMatch.YarnReq !== "")
+                row.YarnReq = knitMatch.YarnReq;
+              if ((row.AllocatedQty === undefined || row.AllocatedQty === "") && knitMatch.AllocatedQty !== undefined && knitMatch.AllocatedQty !== "")
+                row.AllocatedQty = knitMatch.AllocatedQty;
+              if ((row.YarnBala === undefined || row.YarnBala === "") && knitMatch.YarnBala !== undefined && knitMatch.YarnBala !== "")
+                row.YarnBala = knitMatch.YarnBala;
+            }
+
+            if (row.DeliBal === undefined || row.DeliBal === "") {
+              const req = Number(row.RequiredQtyKgs) || 0;
+              const del = Number(row.NetDeliveryQtyKgs) || 0;
+              if (req > 0) row.DeliBal = req - del;
             }
           }
 
@@ -1405,7 +1592,7 @@ router.get("/report-download/:dept", async (req, res) => {
         const [pendingItemsDocs, pendingPlanDocs] = await Promise.all([
           Order.find(
             { orderNo: { $in: chunkNos } },
-            { orderNo: 1, buyer: 1, [`${dept}Items`]: 1 },
+            { orderNo: 1, buyer: 1, [`${dept}Items`]: 1, dyeingItems: 1, knittingItems: 1 },
           ).lean(),
           OrderDate.find(
             { orderNo: { $in: chunkNos } },
@@ -1420,6 +1607,7 @@ router.get("/report-download/:dept", async (req, res) => {
 
         pendingItemsDocs.forEach((orderDoc) => {
           const plan = pendingPlanMap[orderDoc.orderNo] || {};
+          const dyeItems = (orderDoc.dyeingItems || []).map((di) => normalizeItemRow(di, "dyeing"));
 
           if (orderDoc[`${dept}Items`]) {
             orderDoc[`${dept}Items`].forEach((itemData) => {
@@ -1435,6 +1623,18 @@ router.get("/report-download/:dept", async (req, res) => {
               const myColor = String(row.Color || "").trim().toLowerCase();
               const myConst = String(row.FabricConstruction || "").trim().toLowerCase();
               const myGSM = String(row.GSM || "").trim().toLowerCase();
+
+              const dyeMatch = dyeItems.find(
+                (di) => String(di.Color || "").trim().toLowerCase() === myColor,
+              );
+              if (dyeMatch) {
+                if (dyeMatch.BPQty !== undefined && dyeMatch.BPQty !== "")
+                  row.BPQty = dyeMatch.BPQty;
+                if (dyeMatch.DyeingProd !== undefined && dyeMatch.DyeingProd !== "")
+                  row.DyeingProd = dyeMatch.DyeingProd;
+                if (dyeMatch.DyeingBala !== undefined && dyeMatch.DyeingBala !== "")
+                  row.DyeingBala = dyeMatch.DyeingBala;
+              }
 
               if (plan.knitting && Array.isArray(plan.knitting)) {
                 const kItem = plan.knitting.find(

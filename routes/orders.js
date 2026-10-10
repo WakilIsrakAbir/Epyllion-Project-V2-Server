@@ -329,12 +329,27 @@ router.get("/buyers/:dept", async (req, res) => {
 router.get("/report/:dept", async (req, res) => {
   try {
     const { dept } = req.params;
+    const { includePending } = req.query;
 
     const statusField = `${dept}PlanStatus`;
     const itemsField = `${dept}Items`;
 
+    const allowedStatuses =
+      includePending === "true"
+        ? ["Confirm", "Tentative", "Pending"]
+        : ["Confirm", "Tentative"];
+
     const filter = {
-      [statusField]: { $in: ["Confirm", "Tentative"] },
+      $or: [
+        { [statusField]: { $in: allowedStatuses } },
+        ...(includePending === "true"
+          ? [
+              { [statusField]: { $exists: false } },
+              { [statusField]: null },
+              { [statusField]: "" },
+            ]
+          : []),
+      ],
       [itemsField]: { $exists: true, $ne: [] },
     };
 
@@ -1129,6 +1144,22 @@ function normalizeItemRow(rawItem, dept) {
       "Booking Type": getField(["Booking Type", "Type", "YD Type"]),
       YDB: getField(["YDB", "YD B"]),
       "YD Booking Date": getField(["YD Booking Date", "Date", "Booking Date"]),
+      "YD T&A Start": getField([
+        "YD T&A Start",
+        "T&A Start",
+        "YD T&A Start Date",
+        "YD TNA Start",
+        "TNA Start",
+        "Start Date",
+      ]),
+      "YD T&A End": getField([
+        "YD T&A End",
+        "T&A End",
+        "YD T&A End Date",
+        "YD TNA End",
+        "TNA End",
+        "End Date",
+      ]),
       Buyer: getField(["Buyer", "BuyerName", "Customer"]),
       "YD REQ.": getField(["YD REQ.", "YD REQ", "YD Req", "Requirement"]),
       DYED: getField(["DYED", "Dyed", "Dye"]),

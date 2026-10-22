@@ -466,6 +466,30 @@ function buildKeyMap(row) {
     return map;
 }
 
+// Helper: generate consistent itemId for department item
+function generateBackendItemId(row, dept, orderNo) {
+    if (!row) return '';
+    if (row.itemId) return String(row.itemId).toLowerCase().replace(/\s+/g, '');
+
+    const km = buildKeyMap(row);
+    const bNo = String(getVal(row, ['BookingNo', 'OrderNo', 'EWO', 'Booking', 'Order No', 'Booking No'], km) || orderNo || 'N/A').trim();
+    const color = String(getVal(row, ['Color', 'Colour', 'Fab Color'], km) || 'N/A').trim();
+
+    if (dept === 'knitting' || dept === 'delivery') {
+        const fabConst = String(getVal(row, ['FabricConstruction', 'Fabric Construction', 'Construction', 'Fab Const', 'Fabric'], km) || 'N/A').trim();
+        const gsm = String(getVal(row, ['GSM', 'G.S.M', 'Body GSM'], km) || 'N/A').trim();
+        return `${bNo}_${color}_${fabConst}_${gsm}`.toLowerCase().replace(/\s+/g, '');
+    } else if (dept === 'yd') {
+        const type = String(getVal(row, ['Booking Type', 'Type', 'YD Type', 'BookingType'], km) || 'N/A').trim();
+        const ydb = String(getVal(row, ['YDB', 'YD B'], km) || 'N/A').trim();
+        return `${bNo}_${type}_${ydb}`.toLowerCase().replace(/\s+/g, '');
+    } else {
+        // dyeing, finishing
+        const procName = String(getVal(row, ['Process Name', 'ProcessName', 'Process'], km) || 'N/A').trim();
+        return `${bNo}_${color}_${procName}`.toLowerCase().replace(/\s+/g, '');
+    }
+}
+
 // Helper: format Excel serial date to ISO string
 function formatExcelDateServer(val) {
     if (!val || val === 'N/A' || val === '-') return '';
@@ -625,7 +649,7 @@ async function processGeneralFile(sheetData, sheet) {
     }
 }
 
-// Process Department file — stores items array for the department
+// Process Department file — stores items array for the department and synchronizes OrderDate plans
 async function processDeptFile(sheetData, dept) {
     // Group rows by orderNo
     const orderItems = {};
@@ -647,12 +671,100 @@ async function processDeptFile(sheetData, dept) {
         orderItems[orderNo].push(cleanRow);
     }
 
-    // Also extract buyer from dept file items
+    const orderNos = Object.keys(orderItems);
+    if (orderNos.length === 0) return;
+
+    // Fetch existing OrderDate docs for all orderNos in this batch to synchronize plans
+    const orderDateDocs = await OrderDate.find({ orderNo: { $in: orderNos } }).lean();
+    const odMap = new Map();
+    orderDateDocs.forEach(doc => odMap.set(doc.orderNo, doc));
+
+    const orderDateBulkOps = [];
     const itemsField = `${dept}Items`;
     const bulkOps = [];
 
     for (const [orderNo, items] of Object.entries(orderItems)) {
-        const update = { [itemsField]: items };
+        const existingOd = odMap.get(orderNo);
+        const existingPlans = (existingOd && Array.isArray(existingOd[dept])) ? existingOd[dept] : [];
+        let deptPlanStatus = 'Pending';
+
+        if (existingPlans.length > 0) {
+            // Build map of existing plans by itemId
+            const planMap = new Map();
+            existingPlans.forEach(p => {
+                const id = p.itemId ? String(p.itemId).toLowerCase().replace(/\s+/g, '') : generateBackendItemId(p.itemData || p, dept, orderNo);
+                if (id) planMap.set(id, p);
+            });
+
+            const syncedPlans = [];
+            let hasPending = false;
+            let hasTentative = false;
+            let confirmCount = 0;
+            let matchCount = 0;
+
+            items.forEach((item, idx) => {
+                const itemId = generateBackendItemId(item, dept, orderNo) || `item_${idx}`;
+                const saved = planMap.get(itemId);
+
+                if (saved) {
+                    matchCount++;
+                    const cleanType = String(dept === 'delivery' ? (saved.floorPlanType || saved.planType || '') : (saved.planType || '')).trim();
+                    if (!cleanType || cleanType === 'Select' || cleanType === 'Pending') {
+                        hasPending = true;
+                    } else if (cleanType === 'Tentative') {
+                        hasTentative = true;
+                    } else if (cleanType === 'Confirm') {
+                        confirmCount++;
+                    } else {
+                        hasPending = true;
+                    }
+                    syncedPlans.push({
+                        ...saved,
+                        itemId: itemId,
+                        itemData: item // Update itemData with latest Excel values
+                    });
+                } else {
+                    // New item added: treated as Pending
+                    hasPending = true;
+                    syncedPlans.push({
+                        itemId: itemId,
+                        itemData: item,
+                        startDate: '',
+                        endDate: '',
+                        planType: '',
+                        limitation: '',
+                        remarks: '',
+                        floorStartDate: '',
+                        floorEndDate: '',
+                        floorPlanType: '',
+                        yarnDate: ''
+                    });
+                }
+            });
+
+            if (matchCount === 0 || hasPending) {
+                deptPlanStatus = 'Pending';
+            } else if (hasTentative) {
+                deptPlanStatus = 'Tentative';
+            } else if (confirmCount === items.length && items.length > 0) {
+                deptPlanStatus = 'Confirm';
+            } else {
+                deptPlanStatus = 'Pending';
+            }
+
+            orderDateBulkOps.push({
+                updateOne: {
+                    filter: { orderNo },
+                    update: { $set: { [dept]: syncedPlans } },
+                    upsert: true
+                }
+            });
+        }
+
+        const update = { 
+            [itemsField]: items,
+            [`${dept}PlanStatus`]: deptPlanStatus
+        };
 
         // Extract buyer from first item if available
         if (items.length > 0) {
@@ -670,6 +782,13 @@ async function processDeptFile(sheetData, dept) {
                 upsert: true
             }
         });
+    }
+
+    if (orderDateBulkOps.length > 0) {
+        for (let i = 0; i < orderDateBulkOps.length; i += 500) {
+            await OrderDate.bulkWrite(orderDateBulkOps.slice(i, i + 500), { ordered: false });
+        }
+        console.log(`  ${dept}: ${orderDateBulkOps.length} OrderDate docs synchronized with current items`);
     }
 
     if (bulkOps.length > 0) {
@@ -691,10 +810,9 @@ async function processDeptFile(sheetData, dept) {
     }
 }
 
-// Recalculate plan statuses based on OrderDate saved plans
+// Recalculate plan statuses based on OrderDate saved plans cross-referenced with active Order items
 async function recalcPlanStatuses() {
     try {
-        // Get all OrderDate docs (just the status fields)
         const plans = await OrderDate.find({}, {
             orderNo: 1,
             knitting: 1, knittingStatus: 1,
@@ -704,44 +822,80 @@ async function recalcPlanStatuses() {
             yd: 1, ydStatus: 1
         }).lean();
 
+        if (plans.length === 0) return;
+
+        const planOrderNos = plans.map(p => p.orderNo);
+        const orders = await Order.find(
+            { orderNo: { $in: planOrderNos } },
+            { orderNo: 1, knittingItems: 1, dyeingItems: 1, finishingItems: 1, deliveryItems: 1, ydItems: 1 }
+        ).lean();
+
+        const orderMap = new Map();
+        orders.forEach(o => orderMap.set(o.orderNo, o));
+
         const bulkOps = [];
         const depts = ['knitting', 'dyeing', 'finishing', 'delivery', 'yd'];
 
         for (const plan of plans) {
             const update = {};
+            const orderDoc = orderMap.get(plan.orderNo);
 
             for (const dept of depts) {
-                const items = plan[dept];
+                const savedItems = plan[dept] || [];
                 const savedStatus = plan[`${dept}Status`];
+                const activeItems = orderDoc ? (orderDoc[`${dept}Items`] || []) : [];
 
                 if (savedStatus === 'Completed') {
                     update[`${dept}PlanStatus`] = 'Completed';
-                } else if (items && Array.isArray(items) && items.length > 0) {
-                    let hasSelect = false;
+                } else if (activeItems.length === 0) {
+                    update[`${dept}PlanStatus`] = 'Pending';
+                } else if (savedItems.length === 0) {
+                    update[`${dept}PlanStatus`] = 'Pending';
+                } else {
+                    const planMap = new Map();
+                    savedItems.forEach(p => {
+                        const id = p.itemId ? String(p.itemId).toLowerCase().replace(/\s+/g, '') : generateBackendItemId(p.itemData || p, dept, plan.orderNo);
+                        if (id) planMap.set(id, p);
+                    });
+
+                    let hasPending = false;
                     let hasTentative = false;
                     let confirmCount = 0;
+                    let matchCount = 0;
 
-                    items.forEach(item => {
-                        if (!item.planType || item.planType === '' || item.planType === 'Select') {
-                            hasSelect = true;
-                        } else if (item.planType === 'Tentative') {
-                            hasTentative = true;
-                        } else if (item.planType === 'Confirm') {
-                            confirmCount++;
+                    activeItems.forEach((actItem, idx) => {
+                        const itemId = generateBackendItemId(actItem, dept, plan.orderNo) || `item_${idx}`;
+                        const saved = planMap.get(itemId);
+
+                        if (saved) {
+                            matchCount++;
+                            const isDelivery = (dept === 'delivery');
+                            const cleanType = String(isDelivery ? (saved.floorPlanType || saved.planType || '') : (saved.planType || '')).trim();
+
+                            if (!cleanType || cleanType === 'Select' || cleanType === 'Pending') {
+                                hasPending = true;
+                            } else if (cleanType === 'Tentative') {
+                                hasTentative = true;
+                            } else if (cleanType === 'Confirm') {
+                                confirmCount++;
+                            } else {
+                                hasPending = true;
+                            }
+                        } else {
+                            hasPending = true;
                         }
                     });
 
-                    if (hasSelect) {
+                    if (matchCount === 0 || hasPending) {
                         update[`${dept}PlanStatus`] = 'Pending';
                     } else if (hasTentative) {
                         update[`${dept}PlanStatus`] = 'Tentative';
-                    } else if (confirmCount === items.length) {
+                    } else if (confirmCount === activeItems.length && activeItems.length > 0) {
                         update[`${dept}PlanStatus`] = 'Confirm';
                     } else {
                         update[`${dept}PlanStatus`] = 'Pending';
                     }
                 }
-                // If no plan data exists, status remains 'Pending' (default)
             }
 
             if (Object.keys(update).length > 0) {

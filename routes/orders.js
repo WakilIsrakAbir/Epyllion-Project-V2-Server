@@ -264,6 +264,46 @@ router.get("/", async (req, res) => {
   }
 });
 
+// Helpers for generating consistent item IDs matching active items
+function normKeyOrder(key) {
+  return String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+function getValOrder(row, keys) {
+  if (!row) return '';
+  const rowKeys = Object.keys(row);
+  for (const k of keys) {
+    const norm = normKeyOrder(k);
+    const found = rowKeys.find((rk) => normKeyOrder(rk) === norm);
+    if (found !== undefined && row[found] !== undefined && row[found] !== null) {
+      return row[found];
+    }
+  }
+  return '';
+}
+
+function generateBackendItemIdOrder(row, dept, orderNo) {
+  if (!row) return '';
+  if (row.itemId) return String(row.itemId).toLowerCase().replace(/\s+/g, '');
+
+  const bNo = String(getValOrder(row, ['BookingNo', 'OrderNo', 'EWO', 'Booking', 'Order No', 'Booking No']) || orderNo || 'N/A').trim();
+  const color = String(getValOrder(row, ['Color', 'Colour', 'Fab Color']) || 'N/A').trim();
+
+  if (dept === 'knitting' || dept === 'delivery') {
+    const fabConst = String(getValOrder(row, ['FabricConstruction', 'Fabric Construction', 'Construction', 'Fab Const', 'Fabric']) || 'N/A').trim();
+    const gsm = String(getValOrder(row, ['GSM', 'G.S.M', 'Body GSM']) || 'N/A').trim();
+    return `${bNo}_${color}_${fabConst}_${gsm}`.toLowerCase().replace(/\s+/g, '');
+  } else if (dept === 'yd') {
+    const type = String(getValOrder(row, ['Booking Type', 'Type', 'YD Type', 'BookingType']) || 'N/A').trim();
+    const ydb = String(getValOrder(row, ['YDB', 'YD B']) || 'N/A').trim();
+    return `${bNo}_${type}_${ydb}`.toLowerCase().replace(/\s+/g, '');
+  } else {
+    // dyeing, finishing
+    const procName = String(getValOrder(row, ['Process Name', 'ProcessName', 'Process']) || 'N/A').trim();
+    return `${bNo}_${color}_${procName}`.toLowerCase().replace(/\s+/g, '');
+  }
+}
+
 // ==========================================
 // GET /api/orders/:orderNo — Single order full detail
 // Query params: dept (to know which items to include)
@@ -282,7 +322,23 @@ router.get("/:orderNo", async (req, res) => {
     }
 
     // Get saved plan data from OrderDate
-    const planData = await OrderDate.findOne({ orderNo }).lean();
+    let planData = await OrderDate.findOne({ orderNo }).lean();
+
+    // Sanitize planData: ensure plan items only retain currently active items in order
+    if (planData) {
+      ['knitting', 'dyeing', 'finishing', 'delivery', 'yd'].forEach((d) => {
+        const activeItems = order[`${d}Items`];
+        if (Array.isArray(activeItems) && Array.isArray(planData[d])) {
+          const activeIds = new Set(
+            activeItems.map((item, idx) => generateBackendItemIdOrder(item, d, orderNo) || `item_${idx}`)
+          );
+          planData[d] = planData[d].filter((p) => {
+            const id = p.itemId ? String(p.itemId).toLowerCase().replace(/\s+/g, '') : generateBackendItemIdOrder(p.itemData || p, d, orderNo);
+            return activeIds.has(id);
+          });
+        }
+      });
+    }
 
     res.status(200).json({
       order,

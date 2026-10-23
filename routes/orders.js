@@ -299,7 +299,8 @@ function generateBackendItemIdOrder(row, dept, orderNo) {
     return `${bNo}_${type}_${ydb}`.toLowerCase().replace(/\s+/g, '');
   } else {
     // dyeing, finishing
-    const procName = String(getValOrder(row, ['Process Name', 'ProcessName', 'Process']) || 'N/A').trim();
+    let procName = String(getValOrder(row, ['Process Name', 'ProcessName', 'Process']) || '').trim();
+    if (procName.toLowerCase() === 'n/a' || procName === '-') procName = '';
     return `${bNo}_${color}_${procName}`.toLowerCase().replace(/\s+/g, '');
   }
 }
@@ -326,15 +327,27 @@ router.get("/:orderNo", async (req, res) => {
 
     // Sanitize planData: ensure plan items only retain currently active items in order
     if (planData) {
+      const clean = (id) => String(id || '').toLowerCase().replace(/(_n\/a|_)$/i, '').replace(/\s+/g, '');
       ['knitting', 'dyeing', 'finishing', 'delivery', 'yd'].forEach((d) => {
         const activeItems = order[`${d}Items`];
         if (Array.isArray(activeItems) && Array.isArray(planData[d])) {
-          const activeIds = new Set(
-            activeItems.map((item, idx) => generateBackendItemIdOrder(item, d, orderNo) || `item_${idx}`)
+          const activeCleanIds = new Set(
+            activeItems.map((item, idx) => clean(generateBackendItemIdOrder(item, d, orderNo)) || `item_${idx}`)
           );
           planData[d] = planData[d].filter((p) => {
             const id = p.itemId ? String(p.itemId).toLowerCase().replace(/\s+/g, '') : generateBackendItemIdOrder(p.itemData || p, d, orderNo);
-            return activeIds.has(id);
+            if (activeCleanIds.has(clean(id))) return true;
+            // Also fallback for single item orders or color/YDB match
+            if (d === 'dyeing' || d === 'finishing') {
+              const color = String(p.itemData?.Color || p.itemData?.Colour || '').trim().toLowerCase();
+              if (color && activeItems.some(a => String(getValOrder(a, ['Color', 'Colour', 'Fab Color'])).trim().toLowerCase() === color)) return true;
+            }
+            if (d === 'yd') {
+              const ydb = String(p.itemData?.YDB || p.itemData?.['YD B'] || '').trim().toLowerCase();
+              if (ydb && activeItems.some(a => String(getValOrder(a, ['YDB', 'YD B'])).trim().toLowerCase() === ydb)) return true;
+            }
+            if (activeItems.length === 1 && planData[d].length === 1) return true;
+            return false;
           });
         }
       });
@@ -391,7 +404,7 @@ router.get("/report/:dept", async (req, res) => {
     const itemsField = `${dept}Items`;
 
     const allowedStatuses =
-      includePending === "true"
+      (includePending === "true" || dept === "yd" || dept === "delivery")
         ? ["Confirm", "Tentative", "Pending"]
         : ["Confirm", "Tentative"];
 
@@ -1253,7 +1266,7 @@ router.get("/report-download/:dept", async (req, res) => {
     // Delivery: Pending + Confirm + Tentative
     // Knitting/Dyeing/YD/Finishing: Confirm + Tentative only
     const statusList =
-      dept === "delivery"
+      (dept === "delivery" || dept === "yd")
         ? ["Pending", "Confirm", "Tentative"]
         : ["Confirm", "Tentative"];
     const filter = {

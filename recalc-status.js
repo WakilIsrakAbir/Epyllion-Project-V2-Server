@@ -36,9 +36,52 @@ function generateBackendItemId(row, dept, orderNo) {
         const ydb = String(getVal(row, ['YDB', 'YD B']) || 'N/A').trim();
         return `${bNo}_${type}_${ydb}`.toLowerCase().replace(/\s+/g, '');
     } else {
-        const procName = String(getVal(row, ['Process Name', 'ProcessName', 'Process']) || 'N/A').trim();
+        let procName = String(getVal(row, ['Process Name', 'ProcessName', 'Process']) || '').trim();
+        if (procName.toLowerCase() === 'n/a' || procName === '-') procName = '';
         return `${bNo}_${color}_${procName}`.toLowerCase().replace(/\s+/g, '');
     }
+}
+
+function findMatchingPlan(planMap, item, dept, orderNo) {
+    if (!planMap || planMap.size === 0) return null;
+    const rawId = generateBackendItemId(item, dept, orderNo);
+    if (planMap.has(rawId)) return planMap.get(rawId);
+
+    if (rawId.endsWith('_n/a')) {
+        const altId = rawId.slice(0, -3);
+        if (planMap.has(altId)) return planMap.get(altId);
+    } else if (rawId.endsWith('_')) {
+        const altId = rawId + 'n/a';
+        if (planMap.has(altId)) return planMap.get(altId);
+    }
+
+    const cleanId = rawId.replace(/(_n\/a|_)$/i, '');
+    for (const [key, plan] of planMap.entries()) {
+        const keyClean = key.replace(/(_n\/a|_)$/i, '');
+        if (keyClean === cleanId) return plan;
+    }
+
+    if (dept === 'dyeing' || dept === 'finishing') {
+        const color = String(getVal(item, ['Color', 'Colour', 'Fab Color']) || '').trim().toLowerCase();
+        if (color) {
+            for (const [key, plan] of planMap.entries()) {
+                const pColor = String(getVal(plan.itemData || plan, ['Color', 'Colour', 'Fab Color']) || '').trim().toLowerCase();
+                if (pColor && pColor === color) return plan;
+            }
+        }
+    }
+
+    if (dept === 'yd') {
+        const ydb = String(getVal(item, ['YDB', 'YD B']) || '').trim().toLowerCase();
+        if (ydb && ydb !== 'n/a') {
+            for (const [key, plan] of planMap.entries()) {
+                const pYdb = String(getVal(plan.itemData || plan, ['YDB', 'YD B']) || '').trim().toLowerCase();
+                if (pYdb && pYdb === ydb) return plan;
+            }
+        }
+    }
+
+    return null;
 }
 
 mongoose.connect(process.env.MONGO_URI).then(async () => {
@@ -94,7 +137,7 @@ mongoose.connect(process.env.MONGO_URI).then(async () => {
 
                 activeItems.forEach((actItem, idx) => {
                     const itemId = generateBackendItemId(actItem, dept, plan.orderNo) || `item_${idx}`;
-                    const saved = planMap.get(itemId);
+                    const saved = findMatchingPlan(planMap, actItem, dept, plan.orderNo);
 
                     if (saved) {
                         matchCount++;
@@ -115,12 +158,10 @@ mongoose.connect(process.env.MONGO_URI).then(async () => {
                     }
                 });
 
-                if (matchCount === 0 || hasPending) {
-                    update[`${dept}PlanStatus`] = 'Pending';
-                } else if (hasTentative) {
-                    update[`${dept}PlanStatus`] = 'Tentative';
-                } else if (confirmCount === activeItems.length && activeItems.length > 0) {
+                if (confirmCount === activeItems.length && activeItems.length > 0) {
                     update[`${dept}PlanStatus`] = 'Confirm';
+                } else if (hasTentative || confirmCount > 0) {
+                    update[`${dept}PlanStatus`] = 'Tentative';
                 } else {
                     update[`${dept}PlanStatus`] = 'Pending';
                 }

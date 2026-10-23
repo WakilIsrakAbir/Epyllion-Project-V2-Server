@@ -485,9 +485,59 @@ function generateBackendItemId(row, dept, orderNo) {
         return `${bNo}_${type}_${ydb}`.toLowerCase().replace(/\s+/g, '');
     } else {
         // dyeing, finishing
-        const procName = String(getVal(row, ['Process Name', 'ProcessName', 'Process'], km) || 'N/A').trim();
+        let procName = String(getVal(row, ['Process Name', 'ProcessName', 'Process'], km) || '').trim();
+        if (procName.toLowerCase() === 'n/a' || procName === '-') procName = '';
         return `${bNo}_${color}_${procName}`.toLowerCase().replace(/\s+/g, '');
     }
+}
+
+// Helper: flexibly find saved plan item even if itemId format had minor variations
+function findMatchingPlan(planMap, item, dept, orderNo) {
+    if (!planMap || planMap.size === 0) return null;
+    const rawId = generateBackendItemId(item, dept, orderNo);
+    if (planMap.has(rawId)) return planMap.get(rawId);
+
+    // Try alternate trailing _n/a or _
+    if (rawId.endsWith('_n/a')) {
+        const altId = rawId.slice(0, -3);
+        if (planMap.has(altId)) return planMap.get(altId);
+    } else if (rawId.endsWith('_')) {
+        const altId = rawId + 'n/a';
+        if (planMap.has(altId)) return planMap.get(altId);
+    }
+
+    // Try stripping all trailing underscores or n/a
+    const cleanId = rawId.replace(/(_n\/a|_)$/i, '');
+    for (const [key, plan] of planMap.entries()) {
+        const keyClean = key.replace(/(_n\/a|_)$/i, '');
+        if (keyClean === cleanId) return plan;
+    }
+
+    // Fallback for dyeing / finishing by Color
+    if (dept === 'dyeing' || dept === 'finishing') {
+        const km = buildKeyMap(item);
+        const color = String(getVal(item, ['Color', 'Colour', 'Fab Color'], km) || '').trim().toLowerCase();
+        if (color) {
+            for (const [key, plan] of planMap.entries()) {
+                const pColor = String(getVal(plan.itemData || plan, ['Color', 'Colour', 'Fab Color']) || '').trim().toLowerCase();
+                if (pColor && pColor === color) return plan;
+            }
+        }
+    }
+
+    // Fallback for YD by YDB
+    if (dept === 'yd') {
+        const km = buildKeyMap(item);
+        const ydb = String(getVal(item, ['YDB', 'YD B'], km) || '').trim().toLowerCase();
+        if (ydb && ydb !== 'n/a') {
+            for (const [key, plan] of planMap.entries()) {
+                const pYdb = String(getVal(plan.itemData || plan, ['YDB', 'YD B']) || '').trim().toLowerCase();
+                if (pYdb && pYdb === ydb) return plan;
+            }
+        }
+    }
+
+    return null;
 }
 
 // Helper: format Excel serial date to ISO string
@@ -704,7 +754,7 @@ async function processDeptFile(sheetData, dept) {
 
             items.forEach((item, idx) => {
                 const itemId = generateBackendItemId(item, dept, orderNo) || `item_${idx}`;
-                const saved = planMap.get(itemId);
+                const saved = findMatchingPlan(planMap, item, dept, orderNo);
 
                 if (saved) {
                     matchCount++;
@@ -724,14 +774,19 @@ async function processDeptFile(sheetData, dept) {
                         itemData: item // Update itemData with latest Excel values
                     });
                 } else {
-                    // New item added: treated as Pending
-                    hasPending = true;
+                    // Try to preserve default dates from Order or Excel row
+                    const defaultStart = (dept === 'yd' ? formatExcelDateServer(item['YD T&A Start'] || item['YD T&A\r\nStart'] || item['T&A Start'] || '') : '');
+                    const defaultEnd = (dept === 'yd' ? formatExcelDateServer(item['YD T&A End'] || item['YD T&A\r\nEnd'] || item['T&A End'] || '') : '');
+                    const initialPlanType = (defaultStart && defaultEnd) ? 'Tentative' : '';
+                    if (initialPlanType === 'Tentative') hasTentative = true;
+                    else hasPending = true;
+
                     syncedPlans.push({
                         itemId: itemId,
                         itemData: item,
-                        startDate: '',
-                        endDate: '',
-                        planType: '',
+                        startDate: defaultStart,
+                        endDate: defaultEnd,
+                        planType: initialPlanType,
                         limitation: '',
                         remarks: '',
                         floorStartDate: '',
@@ -742,23 +797,26 @@ async function processDeptFile(sheetData, dept) {
                 }
             });
 
-            if (matchCount === 0 || hasPending) {
-                deptPlanStatus = 'Pending';
-            } else if (hasTentative) {
-                deptPlanStatus = 'Tentative';
-            } else if (confirmCount === items.length && items.length > 0) {
+            if (confirmCount === items.length && items.length > 0) {
                 deptPlanStatus = 'Confirm';
+            } else if (hasTentative || confirmCount > 0) {
+                deptPlanStatus = 'Tentative';
             } else {
                 deptPlanStatus = 'Pending';
             }
 
-            orderDateBulkOps.push({
-                updateOne: {
-                    filter: { orderNo },
-                    update: { $set: { [dept]: syncedPlans } },
-                    upsert: true
-                }
-            });
+            // CRITICAL SAFETY: Never wipe out existing plans if matchCount is 0!
+            if (matchCount === 0 && existingPlans.length > 0) {
+                console.warn(`[WARN] No items matched for order ${orderNo} (${dept}). Preserving existing plans to avoid data loss.`);
+            } else {
+                orderDateBulkOps.push({
+                    updateOne: {
+                        filter: { orderNo },
+                        update: { $set: { [dept]: syncedPlans } },
+                        upsert: true
+                    }
+                });
+            }
         }
 
         const update = { 
@@ -865,7 +923,7 @@ async function recalcPlanStatuses() {
 
                     activeItems.forEach((actItem, idx) => {
                         const itemId = generateBackendItemId(actItem, dept, plan.orderNo) || `item_${idx}`;
-                        const saved = planMap.get(itemId);
+                        const saved = findMatchingPlan(planMap, actItem, dept, plan.orderNo);
 
                         if (saved) {
                             matchCount++;
@@ -886,12 +944,10 @@ async function recalcPlanStatuses() {
                         }
                     });
 
-                    if (matchCount === 0 || hasPending) {
-                        update[`${dept}PlanStatus`] = 'Pending';
-                    } else if (hasTentative) {
-                        update[`${dept}PlanStatus`] = 'Tentative';
-                    } else if (confirmCount === activeItems.length && activeItems.length > 0) {
+                    if (confirmCount === activeItems.length && activeItems.length > 0) {
                         update[`${dept}PlanStatus`] = 'Confirm';
+                    } else if (hasTentative || confirmCount > 0) {
+                        update[`${dept}PlanStatus`] = 'Tentative';
                     } else {
                         update[`${dept}PlanStatus`] = 'Pending';
                     }

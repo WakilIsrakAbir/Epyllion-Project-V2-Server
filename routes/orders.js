@@ -18,14 +18,19 @@ router.use(async (req, res, next) => {
         if (req.query.allowedBuyers === "NONE_ASSIGNED") {
           req.allowedRawBuyers = ["_NONE_"];
         } else {
-          const ids = req.query.allowedBuyers.split(",").filter((x) => x.trim());
+          const ids = req.query.allowedBuyers
+            .split(",")
+            .filter((x) => x.trim());
           if (ids.length > 0) {
             const rawBuyers = await Order.distinct("buyer");
             const allowedNames = rawBuyers.filter((b) => {
-              const id = String(b).toLowerCase().replace(/[^a-z0-9]/g, "");
+              const id = String(b)
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
               return ids.includes(id);
             });
-            req.allowedRawBuyers = allowedNames.length > 0 ? allowedNames : ["_NONE_"];
+            req.allowedRawBuyers =
+              allowedNames.length > 0 ? allowedNames : ["_NONE_"];
           }
         }
       }
@@ -36,16 +41,23 @@ router.use(async (req, res, next) => {
     const buyerPerms = req.user?.permissions?.buyers;
     if (!buyerPerms || buyerPerms.accessType === "all") {
       req.allowedRawBuyers = undefined; // All buyers allowed
-    } else if (buyerPerms.accessType === "none" || !buyerPerms.buyerIds || buyerPerms.buyerIds.length === 0) {
+    } else if (
+      buyerPerms.accessType === "none" ||
+      !buyerPerms.buyerIds ||
+      buyerPerms.buyerIds.length === 0
+    ) {
       req.allowedRawBuyers = ["_NONE_"];
     } else {
       // accessType === "selected"
       const rawBuyers = await Order.distinct("buyer");
       const allowedNames = rawBuyers.filter((b) => {
-        const id = String(b).toLowerCase().replace(/[^a-z0-9]/g, "");
+        const id = String(b)
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
         return buyerPerms.buyerIds.includes(id);
       });
-      req.allowedRawBuyers = allowedNames.length > 0 ? allowedNames : ["_NONE_"];
+      req.allowedRawBuyers =
+        allowedNames.length > 0 ? allowedNames : ["_NONE_"];
     }
   } catch (e) {
     console.error("Error processing allowed buyers middleware:", e);
@@ -154,7 +166,11 @@ router.get("/", async (req, res) => {
 
     // Only show orders from uploaded file for this department
     const deptValid = await DeptValidOrders.findOne({ dept }).lean();
-    if (deptValid && deptValid.validOrderNos && deptValid.validOrderNos.length > 0) {
+    if (
+      deptValid &&
+      deptValid.validOrderNos &&
+      deptValid.validOrderNos.length > 0
+    ) {
       filter.orderNo = { $in: deptValid.validOrderNos };
     }
 
@@ -162,6 +178,13 @@ router.get("/", async (req, res) => {
     const statusField = `${dept}PlanStatus`;
     if (status === "Completed") {
       filter[statusField] = "Completed";
+    } else if (status === "Pending") {
+      filter.$or = [
+        { [statusField]: "Pending" },
+        { [statusField]: { $exists: false } },
+        { [statusField]: null },
+        { [statusField]: "" },
+      ];
     } else {
       filter[statusField] = status;
     }
@@ -184,10 +207,11 @@ router.get("/", async (req, res) => {
 
     // Search by orderNo
     if (search) {
-      const searchCondition = req.query.exact === "true"
-        ? { orderNo: { $regex: `^${search}$`, $options: "i" } }
-        : { orderNo: { $regex: search, $options: "i" } };
-      
+      const searchCondition =
+        req.query.exact === "true"
+          ? { orderNo: { $regex: `^${search}$`, $options: "i" } }
+          : { orderNo: { $regex: search, $options: "i" } };
+
       if (filter.orderNo) {
         // validOrderNos filter already set — combine with $and
         filter.$and = filter.$and || [];
@@ -236,7 +260,11 @@ router.get("/", async (req, res) => {
 
     // Get unique buyers for buyer filter tabs (from all orders matching this department)
     const buyerTabFilter = { [itemsField]: { $exists: true, $ne: [] } };
-    if (deptValid && deptValid.validOrderNos && deptValid.validOrderNos.length > 0) {
+    if (
+      deptValid &&
+      deptValid.validOrderNos &&
+      deptValid.validOrderNos.length > 0
+    ) {
       buyerTabFilter.orderNo = { $in: deptValid.validOrderNos };
     }
     if (req.allowedRawBuyers) {
@@ -266,42 +294,78 @@ router.get("/", async (req, res) => {
 
 // Helpers for generating consistent item IDs matching active items
 function normKeyOrder(key) {
-  return String(key).toLowerCase().replace(/[^a-z0-9]/g, '');
+  return String(key)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 function getValOrder(row, keys) {
-  if (!row) return '';
+  if (!row) return "";
   const rowKeys = Object.keys(row);
   for (const k of keys) {
     const norm = normKeyOrder(k);
     const found = rowKeys.find((rk) => normKeyOrder(rk) === norm);
-    if (found !== undefined && row[found] !== undefined && row[found] !== null) {
+    if (
+      found !== undefined &&
+      row[found] !== undefined &&
+      row[found] !== null
+    ) {
       return row[found];
     }
   }
-  return '';
+  return "";
 }
 
 function generateBackendItemIdOrder(row, dept, orderNo) {
-  if (!row) return '';
-  if (row.itemId) return String(row.itemId).toLowerCase().replace(/\s+/g, '');
+  if (!row) return "";
+  if (row.itemId) return String(row.itemId).toLowerCase().replace(/\s+/g, "");
 
-  const bNo = String(getValOrder(row, ['BookingNo', 'OrderNo', 'EWO', 'Booking', 'Order No', 'Booking No']) || orderNo || 'N/A').trim();
-  const color = String(getValOrder(row, ['Color', 'Colour', 'Fab Color']) || 'N/A').trim();
+  const bNo = String(
+    getValOrder(row, [
+      "BookingNo",
+      "OrderNo",
+      "EWO",
+      "Booking",
+      "Order No",
+      "Booking No",
+    ]) ||
+      orderNo ||
+      "N/A",
+  ).trim();
+  const color = String(
+    getValOrder(row, ["Color", "Colour", "Fab Color"]) || "N/A",
+  ).trim();
 
-  if (dept === 'knitting' || dept === 'delivery') {
-    const fabConst = String(getValOrder(row, ['FabricConstruction', 'Fabric Construction', 'Construction', 'Fab Const', 'Fabric']) || 'N/A').trim();
-    const gsm = String(getValOrder(row, ['GSM', 'G.S.M', 'Body GSM']) || 'N/A').trim();
-    return `${bNo}_${color}_${fabConst}_${gsm}`.toLowerCase().replace(/\s+/g, '');
-  } else if (dept === 'yd') {
-    const type = String(getValOrder(row, ['Booking Type', 'Type', 'YD Type', 'BookingType']) || 'N/A').trim();
-    const ydb = String(getValOrder(row, ['YDB', 'YD B']) || 'N/A').trim();
-    return `${bNo}_${type}_${ydb}`.toLowerCase().replace(/\s+/g, '');
+  if (dept === "knitting" || dept === "delivery") {
+    const fabConst = String(
+      getValOrder(row, [
+        "FabricConstruction",
+        "Fabric Construction",
+        "Construction",
+        "Fab Const",
+        "Fabric",
+      ]) || "N/A",
+    ).trim();
+    const gsm = String(
+      getValOrder(row, ["GSM", "G.S.M", "Body GSM"]) || "N/A",
+    ).trim();
+    return `${bNo}_${color}_${fabConst}_${gsm}`
+      .toLowerCase()
+      .replace(/\s+/g, "");
+  } else if (dept === "yd") {
+    const type = String(
+      getValOrder(row, ["Booking Type", "Type", "YD Type", "BookingType"]) ||
+        "N/A",
+    ).trim();
+    const ydb = String(getValOrder(row, ["YDB", "YD B"]) || "N/A").trim();
+    return `${bNo}_${type}_${ydb}`.toLowerCase().replace(/\s+/g, "");
   } else {
     // dyeing, finishing
-    let procName = String(getValOrder(row, ['Process Name', 'ProcessName', 'Process']) || '').trim();
-    if (procName.toLowerCase() === 'n/a' || procName === '-') procName = '';
-    return `${bNo}_${color}_${procName}`.toLowerCase().replace(/\s+/g, '');
+    let procName = String(
+      getValOrder(row, ["Process Name", "ProcessName", "Process"]) || "",
+    ).trim();
+    if (procName.toLowerCase() === "n/a" || procName === "-") procName = "";
+    return `${bNo}_${color}_${procName}`.toLowerCase().replace(/\s+/g, "");
   }
 }
 
@@ -327,26 +391,61 @@ router.get("/:orderNo", async (req, res) => {
 
     // Sanitize planData: ensure plan items only retain currently active items in order
     if (planData) {
-      const clean = (id) => String(id || '').toLowerCase().replace(/(_n\/a|_)$/i, '').replace(/\s+/g, '');
-      ['knitting', 'dyeing', 'finishing', 'delivery', 'yd'].forEach((d) => {
+      const clean = (id) =>
+        String(id || "")
+          .toLowerCase()
+          .replace(/(_n\/a|_)$/i, "")
+          .replace(/\s+/g, "");
+      ["knitting", "dyeing", "finishing", "delivery", "yd"].forEach((d) => {
         const activeItems = order[`${d}Items`];
         if (Array.isArray(activeItems) && Array.isArray(planData[d])) {
           const activeCleanIds = new Set(
-            activeItems.map((item, idx) => clean(generateBackendItemIdOrder(item, d, orderNo)) || `item_${idx}`)
+            activeItems.map(
+              (item, idx) =>
+                clean(generateBackendItemIdOrder(item, d, orderNo)) ||
+                `item_${idx}`,
+            ),
           );
           planData[d] = planData[d].filter((p) => {
-            const id = p.itemId ? String(p.itemId).toLowerCase().replace(/\s+/g, '') : generateBackendItemIdOrder(p.itemData || p, d, orderNo);
+            const id = p.itemId
+              ? String(p.itemId).toLowerCase().replace(/\s+/g, "")
+              : generateBackendItemIdOrder(p.itemData || p, d, orderNo);
             if (activeCleanIds.has(clean(id))) return true;
             // Also fallback for single item orders or color/YDB match
-            if (d === 'dyeing' || d === 'finishing') {
-              const color = String(p.itemData?.Color || p.itemData?.Colour || '').trim().toLowerCase();
-              if (color && activeItems.some(a => String(getValOrder(a, ['Color', 'Colour', 'Fab Color'])).trim().toLowerCase() === color)) return true;
+            if (d === "dyeing" || d === "finishing") {
+              const color = String(
+                p.itemData?.Color || p.itemData?.Colour || "",
+              )
+                .trim()
+                .toLowerCase();
+              if (
+                color &&
+                activeItems.some(
+                  (a) =>
+                    String(getValOrder(a, ["Color", "Colour", "Fab Color"]))
+                      .trim()
+                      .toLowerCase() === color,
+                )
+              )
+                return true;
             }
-            if (d === 'yd') {
-              const ydb = String(p.itemData?.YDB || p.itemData?.['YD B'] || '').trim().toLowerCase();
-              if (ydb && activeItems.some(a => String(getValOrder(a, ['YDB', 'YD B'])).trim().toLowerCase() === ydb)) return true;
+            if (d === "yd") {
+              const ydb = String(p.itemData?.YDB || p.itemData?.["YD B"] || "")
+                .trim()
+                .toLowerCase();
+              if (
+                ydb &&
+                activeItems.some(
+                  (a) =>
+                    String(getValOrder(a, ["YDB", "YD B"]))
+                      .trim()
+                      .toLowerCase() === ydb,
+                )
+              )
+                return true;
             }
-            if (activeItems.length === 1 && planData[d].length === 1) return true;
+            if (activeItems.length === 1 && planData[d].length === 1)
+              return true;
             return false;
           });
         }
@@ -375,7 +474,11 @@ router.get("/buyers/:dept", async (req, res) => {
 
     // Only show buyers from orders in the uploaded file
     const deptValid = await DeptValidOrders.findOne({ dept }).lean();
-    if (deptValid && deptValid.validOrderNos && deptValid.validOrderNos.length > 0) {
+    if (
+      deptValid &&
+      deptValid.validOrderNos &&
+      deptValid.validOrderNos.length > 0
+    ) {
       filter.orderNo = { $in: deptValid.validOrderNos };
     }
 
@@ -404,7 +507,7 @@ router.get("/report/:dept", async (req, res) => {
     const itemsField = `${dept}Items`;
 
     const allowedStatuses =
-      (includePending === "true" || dept === "yd" || dept === "delivery")
+      includePending === "true" || dept === "yd" || dept === "delivery"
         ? ["Confirm", "Tentative", "Pending"]
         : ["Confirm", "Tentative"];
 
@@ -424,7 +527,11 @@ router.get("/report/:dept", async (req, res) => {
 
     // Only show orders from uploaded file
     const deptValid = await DeptValidOrders.findOne({ dept }).lean();
-    if (deptValid && deptValid.validOrderNos && deptValid.validOrderNos.length > 0) {
+    if (
+      deptValid &&
+      deptValid.validOrderNos &&
+      deptValid.validOrderNos.length > 0
+    ) {
       filter.orderNo = { $in: deptValid.validOrderNos };
     }
 
@@ -490,20 +597,26 @@ router.get("/tracking/:dept", async (req, res) => {
 
     // Only show orders from uploaded file
     const deptValid = await DeptValidOrders.findOne({ dept: dbDept }).lean();
-    if (deptValid && deptValid.validOrderNos && deptValid.validOrderNos.length > 0) {
+    if (
+      deptValid &&
+      deptValid.validOrderNos &&
+      deptValid.validOrderNos.length > 0
+    ) {
       orderFilter.orderNo = { $in: deptValid.validOrderNos };
     }
 
     if (buyer) orderFilter.buyer = { $regex: buyer, $options: "i" };
     if (search) {
-      const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escaped = String(search)
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const pattern = req.query.exact === "true" ? `^${escaped}$` : escaped;
       const searchRegex = new RegExp(pattern, "i");
 
       // If we already have $in filter, we need to combine with search
       if (orderFilter.orderNo && orderFilter.orderNo.$in) {
         orderFilter.orderNo.$in = orderFilter.orderNo.$in.filter((no) =>
-          searchRegex.test(no)
+          searchRegex.test(no),
         );
       } else {
         orderFilter.orderNo = { $regex: pattern, $options: "i" };
@@ -541,7 +654,9 @@ router.get("/tracking/:dept", async (req, res) => {
     //    for orders NOT in the confirmed/completed list
     const orphanMatch = [{ orderNo: { $nin: orderNos } }];
     if (search) {
-      const escaped = String(search).trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const escaped = String(search)
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const pattern = req.query.exact === "true" ? `^${escaped}$` : escaped;
       orphanMatch.push({ orderNo: { $regex: pattern, $options: "i" } });
     }
@@ -837,7 +952,11 @@ router.get("/tracking/:dept", async (req, res) => {
         [`${dbDept}CompletedDate`]: 1,
         [actualField]: 1,
       };
-      if (dept === "dyeing" || dept === "delivery" || dept === "deliveryfloor") {
+      if (
+        dept === "dyeing" ||
+        dept === "delivery" ||
+        dept === "deliveryfloor"
+      ) {
         projection.dyeing = 1;
       }
       paginatedDocs = await OrderDate.find(
@@ -925,11 +1044,21 @@ router.get("/tracking/:dept", async (req, res) => {
 
     // Populate unit and processName for dyeing, delivery, and deliveryfloor
     if (dept === "dyeing" || dept === "delivery" || dept === "deliveryfloor") {
-      const invalidStrings = new Set(["", "-", "n/a", "select", "null", "undefined"]);
+      const invalidStrings = new Set([
+        "",
+        "-",
+        "n/a",
+        "select",
+        "null",
+        "undefined",
+      ]);
       paginatedDocs.forEach((doc) => {
-        const dyeingItems = doc.dyeing && doc.dyeing.length > 0
-          ? doc.dyeing
-          : (paginatedDyeingOrdersMap[doc.orderNo] || []).map((r) => ({ itemData: r }));
+        const dyeingItems =
+          doc.dyeing && doc.dyeing.length > 0
+            ? doc.dyeing
+            : (paginatedDyeingOrdersMap[doc.orderNo] || []).map((r) => ({
+                itemData: r,
+              }));
         const units = [];
         const processes = [];
 
@@ -939,8 +1068,8 @@ router.get("/tracking/:dept", async (req, res) => {
             d.Unit !== undefined && d.Unit !== null
               ? String(d.Unit).trim()
               : it.Unit !== undefined && it.Unit !== null
-              ? String(it.Unit).trim()
-              : "";
+                ? String(it.Unit).trim()
+                : "";
           if (u) {
             u.split("+")
               .map((s) => s.trim())
@@ -1056,13 +1185,40 @@ function normalizeItemRow(rawItem, dept) {
         "Fabric",
       ]),
       GSM: getField(["GSM", "G.S.M"]),
-      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty", "Order Qty"]),
-      Allowance: getField(["Allowance %", "Allowance", "Wastage %", "Wastage", "Allow %", "Allow"]),
+      RequiredQtyKgs: getField([
+        "RequiredQtyKgs",
+        "Req Qty",
+        "Qty",
+        "Order Qty",
+      ]),
+      Allowance: getField([
+        "Allowance %",
+        "Allowance",
+        "Wastage %",
+        "Wastage",
+        "Allow %",
+        "Allow",
+      ]),
       YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req", "Yarn Req."]),
-      AllocatedQty: getField(["Allocated Qty", "Allocated Qty ", "AllocatedQty", "Alloc Qty"]),
-      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala", "Yarn Balance"]),
+      AllocatedQty: getField([
+        "Allocated Qty",
+        "Allocated Qty ",
+        "AllocatedQty",
+        "Alloc Qty",
+      ]),
+      YarnBala: getField([
+        "Yarn bala.",
+        "YarnBala",
+        "Yarn Bala",
+        "Yarn Balance",
+      ]),
       GreyReq: getField(["Grey Req.", "GreyReq", "Grey Req"]),
-      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod", "Knit Production"]),
+      KnitProd: getField([
+        "Knit Prod.",
+        "KnitProd",
+        "Knit Prod",
+        "Knit Production",
+      ]),
       KnitBala: getField([
         "Knit. Bala.",
         "KnitBala",
@@ -1091,8 +1247,19 @@ function normalizeItemRow(rawItem, dept) {
       Slowmoving: getField(["Slowmoving"]),
       FFStock: getField(["FF Stock", "FFStock", "FF_Stock"]),
       BPQty: getField(["BP Qty", "BPQty", "BP_Qty"]),
-      DyeingProd: getField(["Dyeing Prod.", "DyeingProd", "Dyeing Prod", "Dyeing ok", "Dyeing Production"]),
-      DyeingBala: getField(["Dyeing Bala.", "DyeingBala", "Dyeing Bala", "Dyeing Bal."]),
+      DyeingProd: getField([
+        "Dyeing Prod.",
+        "DyeingProd",
+        "Dyeing Prod",
+        "Dyeing ok",
+        "Dyeing Production",
+      ]),
+      DyeingBala: getField([
+        "Dyeing Bala.",
+        "DyeingBala",
+        "Dyeing Bala",
+        "Dyeing Bal.",
+      ]),
     };
   } else if (dept === "knitting") {
     return {
@@ -1113,13 +1280,40 @@ function normalizeItemRow(rawItem, dept) {
         "Fabric",
       ]),
       GSM: getField(["GSM", "G.S.M"]),
-      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty", "Order Qty"]),
-      Allowance: getField(["Allowance %", "Allowance", "Wastage %", "Wastage", "Allow %", "Allow"]),
+      RequiredQtyKgs: getField([
+        "RequiredQtyKgs",
+        "Req Qty",
+        "Qty",
+        "Order Qty",
+      ]),
+      Allowance: getField([
+        "Allowance %",
+        "Allowance",
+        "Wastage %",
+        "Wastage",
+        "Allow %",
+        "Allow",
+      ]),
       YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req", "Yarn Req."]),
-      AllocatedQty: getField(["Allocated Qty", "Allocated Qty ", "AllocatedQty", "Alloc Qty"]),
-      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala", "Yarn Balance"]),
+      AllocatedQty: getField([
+        "Allocated Qty",
+        "Allocated Qty ",
+        "AllocatedQty",
+        "Alloc Qty",
+      ]),
+      YarnBala: getField([
+        "Yarn bala.",
+        "YarnBala",
+        "Yarn Bala",
+        "Yarn Balance",
+      ]),
       GreyReq: getField(["Grey Req.", "GreyReq", "Grey Req"]),
-      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod", "Knit Production"]),
+      KnitProd: getField([
+        "Knit Prod.",
+        "KnitProd",
+        "Knit Prod",
+        "Knit Production",
+      ]),
       KnitBala: getField([
         "Knit. Bala.",
         "KnitBala",
@@ -1159,16 +1353,43 @@ function normalizeItemRow(rawItem, dept) {
         "Booking No",
       ]),
       Color: getField(["Color", "Colour", "Fab Color"]),
-      RequiredQtyKgs: getField(["RequiredQtyKgs", "Req Qty", "Qty", "Order Qty"]),
+      RequiredQtyKgs: getField([
+        "RequiredQtyKgs",
+        "Req Qty",
+        "Qty",
+        "Order Qty",
+      ]),
       Buyer: getField(["Buyer", "BuyerName", "Customer"]),
       Unit: getField(["Unit"]),
       ProcessName: getField(["Process Name", "ProcessName", "Process"]),
-      Allowance: getField(["Allowance %", "Allowance", "Wastage %", "Wastage", "Allow %", "Allow"]),
+      Allowance: getField([
+        "Allowance %",
+        "Allowance",
+        "Wastage %",
+        "Wastage",
+        "Allow %",
+        "Allow",
+      ]),
       YarnReq: getField(["Yarn req.", "YarnReq", "Yarn Req", "Yarn Req."]),
-      AllocatedQty: getField(["Allocated Qty", "Allocated Qty ", "AllocatedQty", "Alloc Qty"]),
-      YarnBala: getField(["Yarn bala.", "YarnBala", "Yarn Bala", "Yarn Balance"]),
+      AllocatedQty: getField([
+        "Allocated Qty",
+        "Allocated Qty ",
+        "AllocatedQty",
+        "Alloc Qty",
+      ]),
+      YarnBala: getField([
+        "Yarn bala.",
+        "YarnBala",
+        "Yarn Bala",
+        "Yarn Balance",
+      ]),
       GreyReq: getField(["Grey Req.", "GreyReq", "Grey Req"]),
-      KnitProd: getField(["Knit Prod.", "KnitProd", "Knit Prod", "Knit Production"]),
+      KnitProd: getField([
+        "Knit Prod.",
+        "KnitProd",
+        "Knit Prod",
+        "Knit Production",
+      ]),
       KnitBala: getField([
         "Knit. Bala.",
         "KnitBala",
@@ -1177,8 +1398,19 @@ function normalizeItemRow(rawItem, dept) {
         "Knit. Bal.",
       ]),
       BPQty: getField(["BP Qty", "BPQty", "BP_Qty"]),
-      DyeingProd: getField(["Dyeing Prod.", "DyeingProd", "Dyeing Prod", "Dyeing ok", "Dyeing Production"]),
-      DyeingBala: getField(["Dyeing Bala.", "DyeingBala", "Dyeing Bala", "Dyeing Bal."]),
+      DyeingProd: getField([
+        "Dyeing Prod.",
+        "DyeingProd",
+        "Dyeing Prod",
+        "Dyeing ok",
+        "Dyeing Production",
+      ]),
+      DyeingBala: getField([
+        "Dyeing Bala.",
+        "DyeingBala",
+        "Dyeing Bala",
+        "Dyeing Bal.",
+      ]),
       NetReceivedQtyKgs: getField([
         "NetReceivedQtyKgs",
         "NetReceivedQty",
@@ -1266,7 +1498,7 @@ router.get("/report-download/:dept", async (req, res) => {
     // Delivery: Pending + Confirm + Tentative
     // Knitting/Dyeing/YD/Finishing: Confirm + Tentative only
     const statusList =
-      (dept === "delivery" || dept === "yd")
+      dept === "delivery" || dept === "yd"
         ? ["Pending", "Confirm", "Tentative"]
         : ["Confirm", "Tentative"];
     const filter = {
@@ -1275,7 +1507,11 @@ router.get("/report-download/:dept", async (req, res) => {
 
     // Only include orders from uploaded file
     const deptValid = await DeptValidOrders.findOne({ dept }).lean();
-    if (deptValid && deptValid.validOrderNos && deptValid.validOrderNos.length > 0) {
+    if (
+      deptValid &&
+      deptValid.validOrderNos &&
+      deptValid.validOrderNos.length > 0
+    ) {
       filter.orderNo = { $in: deptValid.validOrderNos };
     }
 
@@ -1357,9 +1593,12 @@ router.get("/report-download/:dept", async (req, res) => {
         if (d.knittingItems) orderKnitMap[d.orderNo] = d.knittingItems;
         if (d.dyeingItems) orderDyeMap[d.orderNo] = d.dyeingItems;
         if (d.deliveryItems) orderDeliMap[d.orderNo] = d.deliveryItems;
-        if (dept === "knitting") orderItemsMap[d.orderNo] = d.knittingItems || [];
-        else if (dept === "dyeing") orderItemsMap[d.orderNo] = d.dyeingItems || [];
-        else if (dept === "delivery") orderItemsMap[d.orderNo] = d.deliveryItems || [];
+        if (dept === "knitting")
+          orderItemsMap[d.orderNo] = d.knittingItems || [];
+        else if (dept === "dyeing")
+          orderItemsMap[d.orderNo] = d.dyeingItems || [];
+        else if (dept === "delivery")
+          orderItemsMap[d.orderNo] = d.deliveryItems || [];
       });
 
       planDocsChunk.forEach((plan) => {
@@ -1367,92 +1606,198 @@ router.get("/report-download/:dept", async (req, res) => {
         const items = plan[dept] || [];
 
         const latestItems = orderItemsMap[plan.orderNo] || [];
-        const latestNormItems = latestItems.map((li) => normalizeItemRow(li, dept));
-        const knitNormItems = (orderKnitMap[plan.orderNo] || []).map((li) => normalizeItemRow(li, "knitting"));
-        const dyeNormItems = (orderDyeMap[plan.orderNo] || []).map((li) => normalizeItemRow(li, "dyeing"));
-        const deliNormItems = (orderDeliMap[plan.orderNo] || []).map((li) => normalizeItemRow(li, "delivery"));
+        const latestNormItems = latestItems.map((li) =>
+          normalizeItemRow(li, dept),
+        );
+        const knitNormItems = (orderKnitMap[plan.orderNo] || []).map((li) =>
+          normalizeItemRow(li, "knitting"),
+        );
+        const dyeNormItems = (orderDyeMap[plan.orderNo] || []).map((li) =>
+          normalizeItemRow(li, "dyeing"),
+        );
+        const deliNormItems = (orderDeliMap[plan.orderNo] || []).map((li) =>
+          normalizeItemRow(li, "delivery"),
+        );
 
         items.forEach((item) => {
           let row = normalizeItemRow(item.itemData || {}, dept);
 
-          const myColor = String(row.Color || "").trim().toLowerCase();
-          const myConst = String(row.FabricConstruction || "").trim().toLowerCase();
-          const myGSM = String(row.GSM || "").trim().toLowerCase();
-          const myProcess = String(row.ProcessName || "").trim().toLowerCase();
+          const myColor = String(row.Color || "")
+            .trim()
+            .toLowerCase();
+          const myConst = String(row.FabricConstruction || "")
+            .trim()
+            .toLowerCase();
+          const myGSM = String(row.GSM || "")
+            .trim()
+            .toLowerCase();
+          const myProcess = String(row.ProcessName || "")
+            .trim()
+            .toLowerCase();
 
           if (dept === "knitting") {
-            const latestMatch = latestNormItems.find(
-              (ln) =>
-                String(ln.Color || "").trim().toLowerCase() === myColor &&
-                String(ln.FabricConstruction || "").trim().toLowerCase() === myConst &&
-                String(ln.GSM || "").trim().toLowerCase() === myGSM,
-            ) || latestNormItems.find(
-              (ln) => String(ln.Color || "").trim().toLowerCase() === myColor,
-            );
+            const latestMatch =
+              latestNormItems.find(
+                (ln) =>
+                  String(ln.Color || "")
+                    .trim()
+                    .toLowerCase() === myColor &&
+                  String(ln.FabricConstruction || "")
+                    .trim()
+                    .toLowerCase() === myConst &&
+                  String(ln.GSM || "")
+                    .trim()
+                    .toLowerCase() === myGSM,
+              ) ||
+              latestNormItems.find(
+                (ln) =>
+                  String(ln.Color || "")
+                    .trim()
+                    .toLowerCase() === myColor,
+              );
 
             if (latestMatch) {
-              if (latestMatch.Allowance !== undefined && latestMatch.Allowance !== "")
+              if (
+                latestMatch.Allowance !== undefined &&
+                latestMatch.Allowance !== ""
+              )
                 row.Allowance = latestMatch.Allowance;
-              if (latestMatch.YarnReq !== undefined && latestMatch.YarnReq !== "")
+              if (
+                latestMatch.YarnReq !== undefined &&
+                latestMatch.YarnReq !== ""
+              )
                 row.YarnReq = latestMatch.YarnReq;
-              if (latestMatch.AllocatedQty !== undefined && latestMatch.AllocatedQty !== "")
+              if (
+                latestMatch.AllocatedQty !== undefined &&
+                latestMatch.AllocatedQty !== ""
+              )
                 row.AllocatedQty = latestMatch.AllocatedQty;
-              if (latestMatch.YarnBala !== undefined && latestMatch.YarnBala !== "")
+              if (
+                latestMatch.YarnBala !== undefined &&
+                latestMatch.YarnBala !== ""
+              )
                 row.YarnBala = latestMatch.YarnBala;
-              if (latestMatch.GreyReq !== undefined && latestMatch.GreyReq !== "")
+              if (
+                latestMatch.GreyReq !== undefined &&
+                latestMatch.GreyReq !== ""
+              )
                 row.GreyReq = latestMatch.GreyReq;
-              if (latestMatch.KnitProd !== undefined && latestMatch.KnitProd !== "")
+              if (
+                latestMatch.KnitProd !== undefined &&
+                latestMatch.KnitProd !== ""
+              )
                 row.KnitProd = latestMatch.KnitProd;
-              if (latestMatch.KnitBala !== undefined && latestMatch.KnitBala !== "")
+              if (
+                latestMatch.KnitBala !== undefined &&
+                latestMatch.KnitBala !== ""
+              )
                 row.KnitBala = latestMatch.KnitBala;
-              if (latestMatch.RequiredQtyKgs !== undefined && latestMatch.RequiredQtyKgs !== "")
+              if (
+                latestMatch.RequiredQtyKgs !== undefined &&
+                latestMatch.RequiredQtyKgs !== ""
+              )
                 row.RequiredQtyKgs = latestMatch.RequiredQtyKgs;
-              if (latestMatch.NetReceivedQtyKgs !== undefined && latestMatch.NetReceivedQtyKgs !== "")
+              if (
+                latestMatch.NetReceivedQtyKgs !== undefined &&
+                latestMatch.NetReceivedQtyKgs !== ""
+              )
                 row.NetReceivedQtyKgs = latestMatch.NetReceivedQtyKgs;
-              if (latestMatch.NetDeliveryQtyKgs !== undefined && latestMatch.NetDeliveryQtyKgs !== "")
+              if (
+                latestMatch.NetDeliveryQtyKgs !== undefined &&
+                latestMatch.NetDeliveryQtyKgs !== ""
+              )
                 row.NetDeliveryQtyKgs = latestMatch.NetDeliveryQtyKgs;
-              if (latestMatch.DeliBal !== undefined && latestMatch.DeliBal !== "")
+              if (
+                latestMatch.DeliBal !== undefined &&
+                latestMatch.DeliBal !== ""
+              )
                 row.DeliBal = latestMatch.DeliBal;
               if (latestMatch.RFD !== undefined && latestMatch.RFD !== "")
                 row.RFD = latestMatch.RFD;
-              if (latestMatch.Slowmoving !== undefined && latestMatch.Slowmoving !== "")
+              if (
+                latestMatch.Slowmoving !== undefined &&
+                latestMatch.Slowmoving !== ""
+              )
                 row.Slowmoving = latestMatch.Slowmoving;
-              if (latestMatch.FFStock !== undefined && latestMatch.FFStock !== "")
+              if (
+                latestMatch.FFStock !== undefined &&
+                latestMatch.FFStock !== ""
+              )
                 row.FFStock = latestMatch.FFStock;
             }
           } else if (dept === "dyeing") {
-            const latestMatch = latestNormItems.find(
-              (ln) =>
-                String(ln.Color || "").trim().toLowerCase() === myColor &&
-                myProcess && String(ln.ProcessName || "").trim().toLowerCase() === myProcess,
-            ) || latestNormItems.find(
-              (ln) => String(ln.Color || "").trim().toLowerCase() === myColor,
-            );
+            const latestMatch =
+              latestNormItems.find(
+                (ln) =>
+                  String(ln.Color || "")
+                    .trim()
+                    .toLowerCase() === myColor &&
+                  myProcess &&
+                  String(ln.ProcessName || "")
+                    .trim()
+                    .toLowerCase() === myProcess,
+              ) ||
+              latestNormItems.find(
+                (ln) =>
+                  String(ln.Color || "")
+                    .trim()
+                    .toLowerCase() === myColor,
+              );
 
             if (latestMatch) {
-              if (latestMatch.KnitProd !== undefined && latestMatch.KnitProd !== "")
+              if (
+                latestMatch.KnitProd !== undefined &&
+                latestMatch.KnitProd !== ""
+              )
                 row.KnitProd = latestMatch.KnitProd;
-              if (latestMatch.KnitBala !== undefined && latestMatch.KnitBala !== "")
+              if (
+                latestMatch.KnitBala !== undefined &&
+                latestMatch.KnitBala !== ""
+              )
                 row.KnitBala = latestMatch.KnitBala;
               if (latestMatch.BPQty !== undefined && latestMatch.BPQty !== "")
                 row.BPQty = latestMatch.BPQty;
-              if (latestMatch.DyeingProd !== undefined && latestMatch.DyeingProd !== "")
+              if (
+                latestMatch.DyeingProd !== undefined &&
+                latestMatch.DyeingProd !== ""
+              )
                 row.DyeingProd = latestMatch.DyeingProd;
-              if (latestMatch.DyeingBala !== undefined && latestMatch.DyeingBala !== "")
+              if (
+                latestMatch.DyeingBala !== undefined &&
+                latestMatch.DyeingBala !== ""
+              )
                 row.DyeingBala = latestMatch.DyeingBala;
-              if (latestMatch.GreyReq !== undefined && latestMatch.GreyReq !== "")
+              if (
+                latestMatch.GreyReq !== undefined &&
+                latestMatch.GreyReq !== ""
+              )
                 row.GreyReq = latestMatch.GreyReq;
-              if (latestMatch.NetReceivedQtyKgs !== undefined && latestMatch.NetReceivedQtyKgs !== "")
+              if (
+                latestMatch.NetReceivedQtyKgs !== undefined &&
+                latestMatch.NetReceivedQtyKgs !== ""
+              )
                 row.NetReceivedQtyKgs = latestMatch.NetReceivedQtyKgs;
-              if (latestMatch.NetDeliveryQtyKgs !== undefined && latestMatch.NetDeliveryQtyKgs !== "")
+              if (
+                latestMatch.NetDeliveryQtyKgs !== undefined &&
+                latestMatch.NetDeliveryQtyKgs !== ""
+              )
                 row.NetDeliveryQtyKgs = latestMatch.NetDeliveryQtyKgs;
               if (latestMatch.RFD !== undefined && latestMatch.RFD !== "")
                 row.RFD = latestMatch.RFD;
-              if (latestMatch.Slowmoving !== undefined && latestMatch.Slowmoving !== "")
+              if (
+                latestMatch.Slowmoving !== undefined &&
+                latestMatch.Slowmoving !== ""
+              )
                 row.Slowmoving = latestMatch.Slowmoving;
-              if (latestMatch.FFStock !== undefined && latestMatch.FFStock !== "")
+              if (
+                latestMatch.FFStock !== undefined &&
+                latestMatch.FFStock !== ""
+              )
                 row.FFStock = latestMatch.FFStock;
-              if (latestMatch.RequiredQtyKgs !== undefined && latestMatch.RequiredQtyKgs !== "")
+              if (
+                latestMatch.RequiredQtyKgs !== undefined &&
+                latestMatch.RequiredQtyKgs !== ""
+              )
                 row.RequiredQtyKgs = latestMatch.RequiredQtyKgs;
               if (latestMatch.Unit && latestMatch.Unit !== "")
                 row.Unit = latestMatch.Unit;
@@ -1462,24 +1807,50 @@ router.get("/report-download/:dept", async (req, res) => {
 
             // Cross-populate Allowance, YarnReq, AllocatedQty, YarnBala from Knitting if available
             const knitMatch = knitNormItems.find(
-              (kn) => String(kn.Color || "").trim().toLowerCase() === myColor,
+              (kn) =>
+                String(kn.Color || "")
+                  .trim()
+                  .toLowerCase() === myColor,
             );
             if (knitMatch) {
-              if ((row.Allowance === undefined || row.Allowance === "") && knitMatch.Allowance !== undefined && knitMatch.Allowance !== "")
+              if (
+                (row.Allowance === undefined || row.Allowance === "") &&
+                knitMatch.Allowance !== undefined &&
+                knitMatch.Allowance !== ""
+              )
                 row.Allowance = knitMatch.Allowance;
-              if ((row.YarnReq === undefined || row.YarnReq === "") && knitMatch.YarnReq !== undefined && knitMatch.YarnReq !== "")
+              if (
+                (row.YarnReq === undefined || row.YarnReq === "") &&
+                knitMatch.YarnReq !== undefined &&
+                knitMatch.YarnReq !== ""
+              )
                 row.YarnReq = knitMatch.YarnReq;
-              if ((row.AllocatedQty === undefined || row.AllocatedQty === "") && knitMatch.AllocatedQty !== undefined && knitMatch.AllocatedQty !== "")
+              if (
+                (row.AllocatedQty === undefined || row.AllocatedQty === "") &&
+                knitMatch.AllocatedQty !== undefined &&
+                knitMatch.AllocatedQty !== ""
+              )
                 row.AllocatedQty = knitMatch.AllocatedQty;
-              if ((row.YarnBala === undefined || row.YarnBala === "") && knitMatch.YarnBala !== undefined && knitMatch.YarnBala !== "")
+              if (
+                (row.YarnBala === undefined || row.YarnBala === "") &&
+                knitMatch.YarnBala !== undefined &&
+                knitMatch.YarnBala !== ""
+              )
                 row.YarnBala = knitMatch.YarnBala;
             }
 
             // Cross-populate DeliBal from Delivery or calculate
             const deliMatch = deliNormItems.find(
-              (dn) => String(dn.Color || "").trim().toLowerCase() === myColor,
+              (dn) =>
+                String(dn.Color || "")
+                  .trim()
+                  .toLowerCase() === myColor,
             );
-            if (deliMatch && deliMatch.DeliBal !== undefined && deliMatch.DeliBal !== "") {
+            if (
+              deliMatch &&
+              deliMatch.DeliBal !== undefined &&
+              deliMatch.DeliBal !== ""
+            ) {
               row.DeliBal = deliMatch.DeliBal;
             } else if (row.DeliBal === undefined || row.DeliBal === "") {
               const req = Number(row.RequiredQtyKgs) || 0;
@@ -1487,71 +1858,149 @@ router.get("/report-download/:dept", async (req, res) => {
               if (req > 0) row.DeliBal = req - del;
             }
           } else if (dept === "delivery") {
-            const latestMatch = latestNormItems.find(
-              (ln) =>
-                String(ln.Color || "").trim().toLowerCase() === myColor &&
-                String(ln.FabricConstruction || "").trim().toLowerCase() === myConst &&
-                String(ln.GSM || "").trim().toLowerCase() === myGSM,
-            ) || latestNormItems.find(
-              (ln) => String(ln.Color || "").trim().toLowerCase() === myColor,
-            );
+            const latestMatch =
+              latestNormItems.find(
+                (ln) =>
+                  String(ln.Color || "")
+                    .trim()
+                    .toLowerCase() === myColor &&
+                  String(ln.FabricConstruction || "")
+                    .trim()
+                    .toLowerCase() === myConst &&
+                  String(ln.GSM || "")
+                    .trim()
+                    .toLowerCase() === myGSM,
+              ) ||
+              latestNormItems.find(
+                (ln) =>
+                  String(ln.Color || "")
+                    .trim()
+                    .toLowerCase() === myColor,
+              );
 
             if (latestMatch) {
-              if (latestMatch.Allowance !== undefined && latestMatch.Allowance !== "")
+              if (
+                latestMatch.Allowance !== undefined &&
+                latestMatch.Allowance !== ""
+              )
                 row.Allowance = latestMatch.Allowance;
-              if (latestMatch.YarnReq !== undefined && latestMatch.YarnReq !== "")
+              if (
+                latestMatch.YarnReq !== undefined &&
+                latestMatch.YarnReq !== ""
+              )
                 row.YarnReq = latestMatch.YarnReq;
-              if (latestMatch.AllocatedQty !== undefined && latestMatch.AllocatedQty !== "")
+              if (
+                latestMatch.AllocatedQty !== undefined &&
+                latestMatch.AllocatedQty !== ""
+              )
                 row.AllocatedQty = latestMatch.AllocatedQty;
-              if (latestMatch.YarnBala !== undefined && latestMatch.YarnBala !== "")
+              if (
+                latestMatch.YarnBala !== undefined &&
+                latestMatch.YarnBala !== ""
+              )
                 row.YarnBala = latestMatch.YarnBala;
-              if (latestMatch.GreyReq !== undefined && latestMatch.GreyReq !== "")
+              if (
+                latestMatch.GreyReq !== undefined &&
+                latestMatch.GreyReq !== ""
+              )
                 row.GreyReq = latestMatch.GreyReq;
-              if (latestMatch.KnitProd !== undefined && latestMatch.KnitProd !== "")
+              if (
+                latestMatch.KnitProd !== undefined &&
+                latestMatch.KnitProd !== ""
+              )
                 row.KnitProd = latestMatch.KnitProd;
-              if (latestMatch.KnitBala !== undefined && latestMatch.KnitBala !== "")
+              if (
+                latestMatch.KnitBala !== undefined &&
+                latestMatch.KnitBala !== ""
+              )
                 row.KnitBala = latestMatch.KnitBala;
-              if (latestMatch.NetReceivedQtyKgs !== undefined && latestMatch.NetReceivedQtyKgs !== "")
+              if (
+                latestMatch.NetReceivedQtyKgs !== undefined &&
+                latestMatch.NetReceivedQtyKgs !== ""
+              )
                 row.NetReceivedQtyKgs = latestMatch.NetReceivedQtyKgs;
-              if (latestMatch.NetDeliveryQtyKgs !== undefined && latestMatch.NetDeliveryQtyKgs !== "")
+              if (
+                latestMatch.NetDeliveryQtyKgs !== undefined &&
+                latestMatch.NetDeliveryQtyKgs !== ""
+              )
                 row.NetDeliveryQtyKgs = latestMatch.NetDeliveryQtyKgs;
-              if (latestMatch.DeliBal !== undefined && latestMatch.DeliBal !== "")
+              if (
+                latestMatch.DeliBal !== undefined &&
+                latestMatch.DeliBal !== ""
+              )
                 row.DeliBal = latestMatch.DeliBal;
               if (latestMatch.RFD !== undefined && latestMatch.RFD !== "")
                 row.RFD = latestMatch.RFD;
-              if (latestMatch.Slowmoving !== undefined && latestMatch.Slowmoving !== "")
+              if (
+                latestMatch.Slowmoving !== undefined &&
+                latestMatch.Slowmoving !== ""
+              )
                 row.Slowmoving = latestMatch.Slowmoving;
-              if (latestMatch.FFStock !== undefined && latestMatch.FFStock !== "")
+              if (
+                latestMatch.FFStock !== undefined &&
+                latestMatch.FFStock !== ""
+              )
                 row.FFStock = latestMatch.FFStock;
-              if (latestMatch.RequiredQtyKgs !== undefined && latestMatch.RequiredQtyKgs !== "")
+              if (
+                latestMatch.RequiredQtyKgs !== undefined &&
+                latestMatch.RequiredQtyKgs !== ""
+              )
                 row.RequiredQtyKgs = latestMatch.RequiredQtyKgs;
             }
 
             // Cross-populate BPQty, DyeingProd, DyeingBala from Dyeing items
             const dyeMatch = dyeNormItems.find(
-              (dn) => String(dn.Color || "").trim().toLowerCase() === myColor,
+              (dn) =>
+                String(dn.Color || "")
+                  .trim()
+                  .toLowerCase() === myColor,
             );
             if (dyeMatch) {
               if (dyeMatch.BPQty !== undefined && dyeMatch.BPQty !== "")
                 row.BPQty = dyeMatch.BPQty;
-              if (dyeMatch.DyeingProd !== undefined && dyeMatch.DyeingProd !== "")
+              if (
+                dyeMatch.DyeingProd !== undefined &&
+                dyeMatch.DyeingProd !== ""
+              )
                 row.DyeingProd = dyeMatch.DyeingProd;
-              if (dyeMatch.DyeingBala !== undefined && dyeMatch.DyeingBala !== "")
+              if (
+                dyeMatch.DyeingBala !== undefined &&
+                dyeMatch.DyeingBala !== ""
+              )
                 row.DyeingBala = dyeMatch.DyeingBala;
             }
 
             // Cross-populate knitting items if missing
             const knitMatch = knitNormItems.find(
-              (kn) => String(kn.Color || "").trim().toLowerCase() === myColor,
+              (kn) =>
+                String(kn.Color || "")
+                  .trim()
+                  .toLowerCase() === myColor,
             );
             if (knitMatch) {
-              if ((row.Allowance === undefined || row.Allowance === "") && knitMatch.Allowance !== undefined && knitMatch.Allowance !== "")
+              if (
+                (row.Allowance === undefined || row.Allowance === "") &&
+                knitMatch.Allowance !== undefined &&
+                knitMatch.Allowance !== ""
+              )
                 row.Allowance = knitMatch.Allowance;
-              if ((row.YarnReq === undefined || row.YarnReq === "") && knitMatch.YarnReq !== undefined && knitMatch.YarnReq !== "")
+              if (
+                (row.YarnReq === undefined || row.YarnReq === "") &&
+                knitMatch.YarnReq !== undefined &&
+                knitMatch.YarnReq !== ""
+              )
                 row.YarnReq = knitMatch.YarnReq;
-              if ((row.AllocatedQty === undefined || row.AllocatedQty === "") && knitMatch.AllocatedQty !== undefined && knitMatch.AllocatedQty !== "")
+              if (
+                (row.AllocatedQty === undefined || row.AllocatedQty === "") &&
+                knitMatch.AllocatedQty !== undefined &&
+                knitMatch.AllocatedQty !== ""
+              )
                 row.AllocatedQty = knitMatch.AllocatedQty;
-              if ((row.YarnBala === undefined || row.YarnBala === "") && knitMatch.YarnBala !== undefined && knitMatch.YarnBala !== "")
+              if (
+                (row.YarnBala === undefined || row.YarnBala === "") &&
+                knitMatch.YarnBala !== undefined &&
+                knitMatch.YarnBala !== ""
+              )
                 row.YarnBala = knitMatch.YarnBala;
             }
 
@@ -1692,12 +2141,18 @@ router.get("/report-download/:dept", async (req, res) => {
         const [pendingItemsDocs, pendingPlanDocs] = await Promise.all([
           Order.find(
             { orderNo: { $in: chunkNos } },
-            { orderNo: 1, buyer: 1, [`${dept}Items`]: 1, dyeingItems: 1, knittingItems: 1 },
+            {
+              orderNo: 1,
+              buyer: 1,
+              [`${dept}Items`]: 1,
+              dyeingItems: 1,
+              knittingItems: 1,
+            },
           ).lean(),
           OrderDate.find(
             { orderNo: { $in: chunkNos } },
-            { orderNo: 1, knitting: 1, dyeing: 1 }
-          ).lean()
+            { orderNo: 1, knitting: 1, dyeing: 1 },
+          ).lean(),
         ]);
 
         const pendingPlanMap = {};
@@ -1707,7 +2162,9 @@ router.get("/report-download/:dept", async (req, res) => {
 
         pendingItemsDocs.forEach((orderDoc) => {
           const plan = pendingPlanMap[orderDoc.orderNo] || {};
-          const dyeItems = (orderDoc.dyeingItems || []).map((di) => normalizeItemRow(di, "dyeing"));
+          const dyeItems = (orderDoc.dyeingItems || []).map((di) =>
+            normalizeItemRow(di, "dyeing"),
+          );
 
           if (orderDoc[`${dept}Items`]) {
             orderDoc[`${dept}Items`].forEach((itemData) => {
@@ -1717,22 +2174,41 @@ router.get("/report-download/:dept", async (req, res) => {
                 row["Buyer"] =
                   orderDoc.buyer || orderBuyerMap[orderDoc.orderNo] || "";
 
-              let knitStart = "", knitEnd = "", knitType = "";
-              let dyeStart = "", dyeEnd = "", dyeType = "";
+              let knitStart = "",
+                knitEnd = "",
+                knitType = "";
+              let dyeStart = "",
+                dyeEnd = "",
+                dyeType = "";
 
-              const myColor = String(row.Color || "").trim().toLowerCase();
-              const myConst = String(row.FabricConstruction || "").trim().toLowerCase();
-              const myGSM = String(row.GSM || "").trim().toLowerCase();
+              const myColor = String(row.Color || "")
+                .trim()
+                .toLowerCase();
+              const myConst = String(row.FabricConstruction || "")
+                .trim()
+                .toLowerCase();
+              const myGSM = String(row.GSM || "")
+                .trim()
+                .toLowerCase();
 
               const dyeMatch = dyeItems.find(
-                (di) => String(di.Color || "").trim().toLowerCase() === myColor,
+                (di) =>
+                  String(di.Color || "")
+                    .trim()
+                    .toLowerCase() === myColor,
               );
               if (dyeMatch) {
                 if (dyeMatch.BPQty !== undefined && dyeMatch.BPQty !== "")
                   row.BPQty = dyeMatch.BPQty;
-                if (dyeMatch.DyeingProd !== undefined && dyeMatch.DyeingProd !== "")
+                if (
+                  dyeMatch.DyeingProd !== undefined &&
+                  dyeMatch.DyeingProd !== ""
+                )
                   row.DyeingProd = dyeMatch.DyeingProd;
-                if (dyeMatch.DyeingBala !== undefined && dyeMatch.DyeingBala !== "")
+                if (
+                  dyeMatch.DyeingBala !== undefined &&
+                  dyeMatch.DyeingBala !== ""
+                )
                   row.DyeingBala = dyeMatch.DyeingBala;
               }
 
@@ -1740,9 +2216,15 @@ router.get("/report-download/:dept", async (req, res) => {
                 const kItem = plan.knitting.find(
                   (k) =>
                     k.itemData &&
-                    String(k.itemData.Color || "").trim().toLowerCase() === myColor &&
-                    String(k.itemData.FabricConstruction || "").trim().toLowerCase() === myConst &&
-                    String(k.itemData.GSM || "").trim().toLowerCase() === myGSM,
+                    String(k.itemData.Color || "")
+                      .trim()
+                      .toLowerCase() === myColor &&
+                    String(k.itemData.FabricConstruction || "")
+                      .trim()
+                      .toLowerCase() === myConst &&
+                    String(k.itemData.GSM || "")
+                      .trim()
+                      .toLowerCase() === myGSM,
                 );
                 if (kItem) {
                   knitStart = kItem.startDate || "";
@@ -1755,7 +2237,9 @@ router.get("/report-download/:dept", async (req, res) => {
                 const dItem = plan.dyeing.find(
                   (d) =>
                     d.itemData &&
-                    String(d.itemData.Color || "").trim().toLowerCase() === myColor,
+                    String(d.itemData.Color || "")
+                      .trim()
+                      .toLowerCase() === myColor,
                 );
                 if (dItem) {
                   dyeStart = dItem.startDate || "";
@@ -1892,7 +2376,11 @@ router.get("/tracking-download/:dept", async (req, res) => {
 
     // Only include orders from uploaded file
     const deptValid = await DeptValidOrders.findOne({ dept: dbDept }).lean();
-    if (deptValid && deptValid.validOrderNos && deptValid.validOrderNos.length > 0) {
+    if (
+      deptValid &&
+      deptValid.validOrderNos &&
+      deptValid.validOrderNos.length > 0
+    ) {
       orderFilter.orderNo = { $in: deptValid.validOrderNos };
     }
 
@@ -2088,11 +2576,15 @@ router.get("/tracking-download/:dept", async (req, res) => {
       // Compute pass/fail
       const todayDateVal = new Date().setHours(0, 0, 0, 0);
       const calcResult = (actualDate, planDate) => {
-        const hasActual = actualDate && actualDate.trim() !== "" && actualDate !== "-";
+        const hasActual =
+          actualDate && actualDate.trim() !== "" && actualDate !== "-";
         const hasPlan = planDate && planDate.trim() !== "" && planDate !== "-";
         if (hasActual) {
           if (!hasPlan) return "—";
-          return new Date(actualDate).setHours(0, 0, 0, 0) <= new Date(planDate).setHours(0, 0, 0, 0) ? "Pass" : "Fail";
+          return new Date(actualDate).setHours(0, 0, 0, 0) <=
+            new Date(planDate).setHours(0, 0, 0, 0)
+            ? "Pass"
+            : "Fail";
         }
         if (hasPlan) {
           if (new Date(planDate).setHours(0, 0, 0, 0) < todayDateVal) {

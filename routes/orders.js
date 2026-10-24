@@ -1561,6 +1561,10 @@ router.get("/report-download/:dept", async (req, res) => {
 
         items.forEach((item) => {
           let row = normalizeItemRow(item.itemData || {}, dept);
+          if (!row.Unit && item.Unit) row.Unit = item.Unit;
+          if (!row.ProcessName && (item.ProcessName || item['Process Name'] || item.processName)) {
+            row.ProcessName = item.ProcessName || item['Process Name'] || item.processName;
+          }
 
           const myColor = String(row.Color || "")
             .trim()
@@ -1739,9 +1743,9 @@ router.get("/report-download/:dept", async (req, res) => {
                 latestMatch.RequiredQtyKgs !== ""
               )
                 row.RequiredQtyKgs = latestMatch.RequiredQtyKgs;
-              if (latestMatch.Unit && latestMatch.Unit !== "")
+              if ((!row.Unit || row.Unit === "") && latestMatch.Unit && latestMatch.Unit !== "")
                 row.Unit = latestMatch.Unit;
-              if (latestMatch.ProcessName && latestMatch.ProcessName !== "")
+              if ((!row.ProcessName || row.ProcessName === "") && latestMatch.ProcessName && latestMatch.ProcessName !== "")
                 row.ProcessName = latestMatch.ProcessName;
             }
 

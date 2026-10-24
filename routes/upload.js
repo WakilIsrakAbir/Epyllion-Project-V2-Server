@@ -998,55 +998,70 @@ async function processDeptFile(sheetData, dept) {
           } else {
             hasPending = true;
           }
+
+          // Preserve user-entered attributes from existing itemData
+          const existingItemData = saved.itemData || {};
+          const mergedItemData = { ...item };
+
+          if (existingItemData.Unit) mergedItemData.Unit = existingItemData.Unit;
+          if (existingItemData.ProcessName) {
+            mergedItemData.ProcessName = existingItemData.ProcessName;
+            mergedItemData["Process Name"] = existingItemData.ProcessName;
+          } else if (existingItemData["Process Name"]) {
+            mergedItemData["Process Name"] = existingItemData["Process Name"];
+            mergedItemData.ProcessName = existingItemData["Process Name"];
+          }
+          if (existingItemData["Barrier Qty."] !== undefined && existingItemData["Barrier Qty."] !== "") {
+            mergedItemData["Barrier Qty."] = existingItemData["Barrier Qty."];
+          }
+          if (existingItemData["Workable Qty."] !== undefined && existingItemData["Workable Qty."] !== "") {
+            mergedItemData["Workable Qty."] = existingItemData["Workable Qty."];
+          }
+
           syncedPlans.push({
             ...saved,
             itemId: itemId,
-            itemData: item, // Update itemData with latest Excel values
+            itemData: mergedItemData,
+            startDate: saved.startDate || "",
+            endDate: saved.endDate || "",
+            planType: saved.planType || "",
+            limitation: saved.limitation || "",
+            remarks: saved.remarks || "",
+            floorStartDate: saved.floorStartDate || "",
+            floorEndDate: saved.floorEndDate || "",
+            floorPlanType: saved.floorPlanType || "",
+            yarnDate: saved.yarnDate || "",
+            yarnOkDate: saved.yarnOkDate || "",
+            matchingOptionDate: saved.matchingOptionDate || ""
           });
         } else {
-          // Try to preserve default dates from Order or Excel row
-          const defaultStart =
-            dept === "yd"
-              ? formatExcelDateServer(
-                  item["YD T&A Start"] ||
-                    item["YD T&A\r\nStart"] ||
-                    item["T&A Start"] ||
-                    "",
-                )
-              : "";
-          const defaultEnd =
-            dept === "yd"
-              ? formatExcelDateServer(
-                  item["YD T&A End"] ||
-                    item["YD T&A\r\nEnd"] ||
-                    item["T&A End"] ||
-                    "",
-                )
-              : "";
-          const initialPlanType = defaultStart && defaultEnd ? "Tentative" : "";
-          if (initialPlanType === "Tentative") hasTentative = true;
-          else hasPending = true;
+          // Brand new item added from Excel: treat as Pending so planner can plan it
+          hasPending = true;
 
           syncedPlans.push({
             itemId: itemId,
             itemData: item,
-            startDate: defaultStart,
-            endDate: defaultEnd,
-            planType: initialPlanType,
+            startDate: "",
+            endDate: "",
+            planType: "",
             limitation: "",
             remarks: "",
             floorStartDate: "",
             floorEndDate: "",
             floorPlanType: "",
             yarnDate: "",
+            yarnOkDate: "",
+            matchingOptionDate: ""
           });
         }
       });
 
-      if (confirmCount === items.length && items.length > 0) {
-        deptPlanStatus = "Confirm";
-      } else if (hasTentative || confirmCount > 0) {
+      if (hasPending || matchCount === 0) {
+        deptPlanStatus = "Pending";
+      } else if (hasTentative) {
         deptPlanStatus = "Tentative";
+      } else if (confirmCount === items.length && items.length > 0) {
+        deptPlanStatus = "Confirm";
       } else {
         deptPlanStatus = "Pending";
       }

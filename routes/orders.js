@@ -389,68 +389,8 @@ router.get("/:orderNo", async (req, res) => {
     // Get saved plan data from OrderDate
     let planData = await OrderDate.findOne({ orderNo }).lean();
 
-    // Sanitize planData: ensure plan items only retain currently active items in order
-    if (planData) {
-      const clean = (id) =>
-        String(id || "")
-          .toLowerCase()
-          .replace(/(_n\/a|_)$/i, "")
-          .replace(/\s+/g, "");
-      ["knitting", "dyeing", "finishing", "delivery", "yd"].forEach((d) => {
-        const activeItems = order[`${d}Items`];
-        if (Array.isArray(activeItems) && Array.isArray(planData[d])) {
-          const activeCleanIds = new Set(
-            activeItems.map(
-              (item, idx) =>
-                clean(generateBackendItemIdOrder(item, d, orderNo)) ||
-                `item_${idx}`,
-            ),
-          );
-          planData[d] = planData[d].filter((p) => {
-            const id = p.itemId
-              ? String(p.itemId).toLowerCase().replace(/\s+/g, "")
-              : generateBackendItemIdOrder(p.itemData || p, d, orderNo);
-            if (activeCleanIds.has(clean(id))) return true;
-            // Also fallback for single item orders or color/YDB match
-            if (d === "dyeing" || d === "finishing") {
-              const color = String(
-                p.itemData?.Color || p.itemData?.Colour || "",
-              )
-                .trim()
-                .toLowerCase();
-              if (
-                color &&
-                activeItems.some(
-                  (a) =>
-                    String(getValOrder(a, ["Color", "Colour", "Fab Color"]))
-                      .trim()
-                      .toLowerCase() === color,
-                )
-              )
-                return true;
-            }
-            if (d === "yd") {
-              const ydb = String(p.itemData?.YDB || p.itemData?.["YD B"] || "")
-                .trim()
-                .toLowerCase();
-              if (
-                ydb &&
-                activeItems.some(
-                  (a) =>
-                    String(getValOrder(a, ["YDB", "YD B"]))
-                      .trim()
-                      .toLowerCase() === ydb,
-                )
-              )
-                return true;
-            }
-            if (activeItems.length === 1 && planData[d].length === 1)
-              return true;
-            return false;
-          });
-        }
-      });
-    }
+    // Return complete planData without discarding items
+    // (client detailed-view handles matching with active items)
 
     res.status(200).json({
       order,

@@ -243,10 +243,12 @@ mongoose
             }
           });
 
-          if (confirmCount === activeItems.length && activeItems.length > 0) {
-            update[`${dept}PlanStatus`] = "Confirm";
-          } else if (hasTentative || confirmCount > 0) {
+          if (hasPending || matchCount === 0) {
+            update[`${dept}PlanStatus`] = "Pending";
+          } else if (hasTentative) {
             update[`${dept}PlanStatus`] = "Tentative";
+          } else if (confirmCount === activeItems.length && activeItems.length > 0) {
+            update[`${dept}PlanStatus`] = "Confirm";
           } else {
             update[`${dept}PlanStatus`] = "Pending";
           }

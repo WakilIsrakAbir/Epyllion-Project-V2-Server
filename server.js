@@ -10,6 +10,9 @@ const app = express();
 // Middlewares
 app.use(compression()); // GZIP compress all responses — 60-80% smaller JSON payloads
 app.use(cors());
+// Batch Plan module (additive). Mounted before the global JSON parser because it
+// accepts larger plan snapshots and parses its own request bodies.
+app.use('/api/batch', require('./routes/batch'));
 app.use(express.json());
 
 // 1. Database Connection

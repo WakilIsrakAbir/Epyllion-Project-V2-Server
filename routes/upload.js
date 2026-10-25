@@ -8,6 +8,11 @@ const OrderDate = require("../models/OrderDate");
 const Order = require("../models/Order");
 const DeptValidOrders = require("../models/DeptValidOrders");
 const User = require("../models/User");
+// Batch Plan module (additive): BP Data storage
+const BatchBpData = require("../models/BatchBpData");
+const BatchPlan = require("../models/BatchPlan");
+const BatchCard = require("../models/BatchCard");
+const batchSource = require("../lib/batch/source");
 const { authenticateToken, requireAdmin } = require("../middleware/auth");
 
 // Protect all upload and file endpoints with token authentication
@@ -60,6 +65,25 @@ router.post("/upload", upload.single("document"), async (req, res) => {
         .json({ message: "Database not ready. Please try again." });
     }
 
+    // Batch Plan module: BP Data is checked before anything is saved (demo rules).
+    if (category === "BP") {
+      // Same permission the page uses to show the BP Data tab (Admin always allowed).
+      if (!batchSource.can(req.user, "actions.uploadBP")) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(403).json({ message: "You do not have permission to upload BP Data." });
+      }
+      let bpError = "";
+      try {
+        bpError = readBpRows(XLSX.readFile(req.file.path)).error;
+      } catch (readErr) {
+        bpError = "Sheet parsing error: " + readErr.message;
+      }
+      if (bpError) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(400).json({ message: bpError });
+      }
+    }
+
     // File stream disk theke GridFS-e pipe kori
     const uploadStream = bucket.openUploadStream(savedName, {
       contentType: req.file.mimetype,
@@ -100,6 +124,7 @@ router.post("/upload", upload.single("document"), async (req, res) => {
         savedName,
         category,
         bucket,
+        originalName,
       );
       console.log(`✅ Excel parsed and stored in Order collection`);
     } catch (parseErr) {
@@ -207,6 +232,11 @@ router.delete("/clear-all-planning", requireAdmin, async (req, res) => {
 
     // 1. OrderDate collection clear
     await OrderDate.deleteMany({});
+
+    // Batch Plan module data (Setup tables are kept)
+    await BatchBpData.deleteMany({});
+    await BatchPlan.deleteMany({});
+    await BatchCard.deleteMany({});
 
     // 2. File metadata collection clear
     await File.deleteMany({});
@@ -484,6 +514,7 @@ router.post("/migrate-to-orders", async (req, res) => {
           file.savedName,
           file.category || "General",
           bucket,
+          file.originalName,
         );
         processed++;
         console.log(`Migrated: ${file.originalName} (${file.category})`);
@@ -663,7 +694,7 @@ function formatExcelDateServer(val) {
 }
 
 // Main function: Parse an uploaded Excel file and update Order collection
-async function parseAndStoreExcel(filePath, savedName, category, bucket) {
+async function parseAndStoreExcel(filePath, savedName, category, bucket, originalName = "") {
   // Read file from GridFS
   const chunks = [];
   const stream = bucket.openDownloadStreamByName(savedName);
@@ -672,6 +703,12 @@ async function parseAndStoreExcel(filePath, savedName, category, bucket) {
   }
   const buf = Buffer.concat(chunks);
   const wb = XLSX.read(buf, { type: "buffer" });
+
+  // Batch Plan module: BP Data goes to its own collection, never into Order.
+  if (String(category || "") === "BP") {
+    await processBpFile(wb, originalName || savedName);
+    return;
+  }
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const sheetData = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
@@ -1231,6 +1268,41 @@ async function recalcPlanStatuses() {
   } catch (error) {
     console.error("Error recalculating plan statuses:", error);
   }
+}
+
+// ==========================================================
+// Batch Plan module: BP Data (sheet "BP Data", else the first sheet)
+// ==========================================================
+function readBpRows(wb) {
+  const sheetName = wb.Sheets["BP Data"] ? "BP Data" : wb.SheetNames[0];
+  const sheet = wb.Sheets[sheetName];
+  if (!sheet) return { rows: [], error: "Could not find the BP Data sheet." };
+  const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+  const headerError = batchSource.bpHeaderError(rows);
+  if (headerError) return { rows, error: headerError };
+  if (!batchSource.groupBpRows(rows).size) {
+    return { rows, error: "No booking records found. Check that the sheet has an OrderNo column." };
+  }
+  return { rows, error: "" };
+}
+
+// Demo rule: orders in the new file replace their old rows; rows previously
+// uploaded from a file with the same name are removed; other files' rows stay.
+async function processBpFile(wb, fileName) {
+  const { rows, error } = readBpRows(wb);
+  if (error) throw new Error(error);
+  const owner = String(fileName || "").toLowerCase();
+  const grouped = batchSource.groupBpRows(rows);
+  const keys = Array.from(grouped.keys());
+  await BatchBpData.deleteMany({ $or: [{ orderKey: { $in: keys } }, ...(owner ? [{ owner }] : [])] });
+  const docs = [];
+  for (const [orderKey, group] of grouped) {
+    for (const row of group.rows) docs.push({ orderKey, orderNo: group.orderNo, owner, row });
+  }
+  for (let i = 0; i < docs.length; i += 1000) {
+    await BatchBpData.insertMany(docs.slice(i, i + 1000), { ordered: false });
+  }
+  console.log(`  BP Data: ${docs.length} rows for ${keys.length} orders stored`);
 }
 
 // Export recalcPlanStatuses so save-dates can call it

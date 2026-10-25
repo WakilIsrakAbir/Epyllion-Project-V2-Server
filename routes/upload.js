@@ -649,7 +649,7 @@ function findMatchingPlan(planMap, item, dept, orderNo) {
     if (color) {
       for (const [key, plan] of planMap.entries()) {
         const pColor = String(
-          getVal(plan.itemData || plan, ["Color", "Colour", "Fab Color"]) || "",
+          getVal(plan.itemData || plan, ["Color", "Colour", "Fab Color"], buildKeyMap(plan.itemData || plan)) || "",
         )
           .trim()
           .toLowerCase();
@@ -667,7 +667,7 @@ function findMatchingPlan(planMap, item, dept, orderNo) {
     if (ydb && ydb !== "n/a") {
       for (const [key, plan] of planMap.entries()) {
         const pYdb = String(
-          getVal(plan.itemData || plan, ["YDB", "YD B"]) || "",
+          getVal(plan.itemData || plan, ["YDB", "YD B"], buildKeyMap(plan.itemData || plan)) || "",
         )
           .trim()
           .toLowerCase();
@@ -991,6 +991,7 @@ async function processDeptFile(sheetData, dept) {
   const orderDateBulkOps = [];
   const itemsField = `${dept}Items`;
   const bulkOps = [];
+  const buyerFillOps = [];
 
   for (const [orderNo, items] of Object.entries(orderItems)) {
     const existingOd = odMap.get(orderNo);
@@ -1124,7 +1125,9 @@ async function processDeptFile(sheetData, dept) {
       [`${dept}PlanStatus`]: deptPlanStatus,
     };
 
-    // Extract buyer from first item if available
+    // Extract buyer from first item if available.
+    // It only fills an order that has no buyer yet, so the General file's buyer is never
+    // replaced by a department file (for example by "PENDING"). Applied after the item update.
     if (items.length > 0) {
       const km = buildKeyMap(items[0]);
       const buyer = String(
@@ -1134,7 +1137,12 @@ async function processDeptFile(sheetData, dept) {
         .toUpperCase()
         .replace(/\s+/g, " ");
       if (buyer && buyer !== "UNDEFINED" && buyer !== "N/A" && buyer !== "") {
-        update.buyer = buyer;
+        buyerFillOps.push({
+          updateOne: {
+            filter: { orderNo, $or: [{ buyer: { $exists: false } }, { buyer: null }, { buyer: "" }] },
+            update: { $set: { buyer } },
+          },
+        });
       }
     }
 
@@ -1163,6 +1171,12 @@ async function processDeptFile(sheetData, dept) {
       await Order.bulkWrite(bulkOps.slice(i, i + 500), { ordered: false });
     }
     console.log(`  ${dept}: ${bulkOps.length} orders updated with items`);
+  }
+
+  if (buyerFillOps.length > 0) {
+    for (let i = 0; i < buyerFillOps.length; i += 500) {
+      await Order.bulkWrite(buyerFillOps.slice(i, i + 500), { ordered: false });
+    }
   }
 
   // Save valid orderNos for filtering — latest dept file-এর orderNo গুলো track করো

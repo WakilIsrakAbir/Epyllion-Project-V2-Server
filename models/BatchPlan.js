@@ -7,7 +7,10 @@ const batchPlanSchema = new mongoose.Schema({
     orderNo: { type: String, required: true },
     stateJson: { type: String, default: "{}" },               // plan state as JSON text (keys may contain dots)
     version: { type: Number, default: 0 },
-    updatedBy: { type: String, default: '' }
+    updatedBy: { type: String, default: '' },
+    // Units this plan keeps in the sidebar (lib/batch/source.js planRetainedUnits), as of retainedVersion.
+    retainedUnits: { type: [String], default: undefined },
+    retainedVersion: { type: Number }
 }, { timestamps: true, minimize: false });
 
 module.exports = mongoose.model('BatchPlan', batchPlanSchema);

@@ -20,10 +20,6 @@ router.use(authenticateToken);
 const parseJson = express.json({ limit: '25mb' });
 const MAX_PLANS_PER_SAVE = 1000, MAX_CARDS_PER_SAVE = 5000;
 
-const MENU_KEYS = ['menus.batchPlan.all', ...S.FLOOR_KEYS.map(f => 'menus.batchPlan.' + f.toLowerCase()),
-  'menus.batchCard.all', ...S.FLOOR_KEYS.map(f => 'menus.batchCard.' + f.toLowerCase()),
-  'menus.batchReport.dyeableBatch', 'menus.batchReport.dyeableSummary', 'menus.batchReport.dailyConfirm',
-  'menus.dataManagement.dyeingMc', 'menus.dataManagement.flatAllowance', 'menus.dataManagement.unitSetup'];
 const SETTING_PERMISSIONS = { setup: 'menus.dataManagement.dyeingMc', flatAllowance: 'menus.dataManagement.flatAllowance', unitSetup: 'menus.dataManagement.unitSetup' };
 const ACTION_LABELS = {
   'actions.batchEdit': 'edit batch plans', 'actions.batchTentative': 'make a batch plan Tentative',
@@ -32,7 +28,7 @@ const ACTION_LABELS = {
 };
 
 function requireModuleAccess(req, res, next) {
-  if (MENU_KEYS.some(key => S.can(req.user, key))) return next();
+  if (S.hasBatchAccess(req.user)) return next();
   return res.status(403).json({ message: 'Access forbidden: Batch Plan permission required.' });
 }
 
@@ -88,18 +84,104 @@ async function buyerNames() {
   return Array.from(names.values()).sort((a, b) => a.localeCompare(b));
 }
 
-async function generalOrders(user) {
+const ORDER_FIELDS = {
+  orderNo: 1, buyer: 1, buyerTeam: 1, bookingDate: 1, eventDay: 1, style: 1, pmc: 1, bookedBy: 1, bookingBy: 1,
+  floor: 1, gmtUnit: 1, brush: 1, peach: 1, heatset: 1, knitStart: 1, knitEnd: 1, dyeStart: 1, dyeEnd: 1,
+  deliStart: 1, deliEnd: 1, ship1: 1, shipLast: 1, fabricNotes: 1, pmcNotes: 1,
+  knittingPlanStatus: 1, dyeingPlanStatus: 1, deliveryPlanStatus: 1, knittingItems: 1, dyeingItems: 1
+};
+// For the sidebar unit list only: the knitting colour headers the unit rule reads (exact names, as the demo's
+// firstUploadedValue reads them) instead of whole knitting rows, to keep memory low on every page load.
+const UNIT_ORDER_FIELDS = {
+  orderNo: 1, buyer: 1, floor: 1, dyeingItems: 1,
+  'knittingItems.Color': 1, 'knittingItems.Colour': 1, 'knittingItems.Shade': 1, 'knittingItems.Color Name': 1, 'knittingItems.Colour Name': 1
+};
+async function generalOrders(user, fields = ORDER_FIELDS) {
   const valid = await DeptValidOrders.findOne({ dept: 'general' }).lean();
   const filter = valid?.validOrderNos?.length ? { orderNo: { $in: valid.validOrderNos } } : {};
   const buyers = await allowedBuyerSet(user);
   if (buyers) filter.buyer = { $in: Array.from(buyers) };
-  return Order.find(filter, {
-    orderNo: 1, buyer: 1, buyerTeam: 1, bookingDate: 1, eventDay: 1, style: 1, pmc: 1, bookedBy: 1, bookingBy: 1,
-    floor: 1, gmtUnit: 1, brush: 1, peach: 1, heatset: 1, knitStart: 1, knitEnd: 1, dyeStart: 1, dyeEnd: 1,
-    deliStart: 1, deliEnd: 1, ship1: 1, shipLast: 1, fabricNotes: 1, pmcNotes: 1,
-    knittingPlanStatus: 1, dyeingPlanStatus: 1, deliveryPlanStatus: 1, knittingItems: 1, dyeingItems: 1
-  }).lean();
+  return Order.find(filter, fields).lean();
 }
+
+/* Units of these orders' knitting rows, from the Dyeing Plan unit (plan section 16.3), and the data they
+   need: the latest Dyeing file's order list and the saved Dyeing Plan units. */
+async function orderUnits(orders) {
+  const [dyeingValid, orderDates] = await Promise.all([
+    DeptValidOrders.findOne({ dept: 'dyeing' }).lean(),
+    // Only what the Dyeing screen's unit rule reads from a saved Dyeing row (lib/batch/source.js dyeingScreenUnits).
+    OrderDate.find({ orderNo: { $in: orders.map(o => o.orderNo) } }, { orderNo: 1, 'dyeing.itemId': 1, 'dyeing.itemData.Unit': 1, 'dyeing.itemData.Color': 1 }).lean()
+  ]);
+  // Like the Dyeing Plan list, only orders in the latest Dyeing file use their Dyeing rows; the others use the General 'Unit'.
+  const dyeingOrders = dyeingValid?.validOrderNos?.length ? new Set(dyeingValid.validOrderNos) : null;
+  return S.unitsForOrders(orders, { orderDateByNo: new Map(orderDates.map(doc => [doc.orderNo, doc])), dyeingOrders });
+}
+
+/* Units that these orders' saved plans and cards keep in the sidebar: the same rules as GET /state
+   (S.planRetainedUnits, S.cardRetainedUnit). Each record stores its units when it is saved, so the sidebar
+   list does not parse every saved plan on each page load. A record saved before these fields existed, or a
+   plan saved since by an older server (its version moved on), is read once here and its fields are filled
+   in, without changing its version or updatedAt. */
+async function retainedUnits(orderKeys) {
+  const units = new Set();
+  const [plans, cards] = await Promise.all([
+    BatchPlan.find({ orderKey: { $in: orderKeys } }, { orderKey: 1, version: 1, retainedUnits: 1, retainedVersion: 1 }).lean(),
+    BatchCard.find({ orderKey: { $in: orderKeys } }, { cardId: 1, retainedUnit: 1 }).lean()
+  ]);
+  const stalePlans = [], staleCards = [];
+  for (const plan of plans) {
+    if (plan.retainedVersion === plan.version && Array.isArray(plan.retainedUnits)) plan.retainedUnits.forEach(unit => units.add(unit));
+    else stalePlans.push(plan.orderKey);
+  }
+  for (const card of cards) {
+    if (typeof card.retainedUnit !== 'string') staleCards.push(card.cardId);
+    else if (card.retainedUnit) units.add(card.retainedUnit);
+  }
+  const saveFields = (Model, ops) => ops.length && Model.bulkWrite(ops, { ordered: false, timestamps: false })
+    .catch(error => console.error('Batch retained units not saved:', error));
+  // In small groups, so only a few saved plans are parsed at a time.
+  for (let i = 0; i < stalePlans.length; i += 100) {
+    const docs = await BatchPlan.find({ orderKey: { $in: stalePlans.slice(i, i + 100) } }, { orderKey: 1, version: 1, stateJson: 1 }).lean();
+    await saveFields(BatchPlan, docs.map(doc => {
+      let state = {};
+      try { state = JSON.parse(doc.stateJson || '{}'); } catch (_) { state = {}; }
+      const kept = S.planRetainedUnits(state);
+      kept.forEach(unit => units.add(unit));
+      return { updateOne: { filter: { orderKey: doc.orderKey, version: doc.version }, update: { $set: { retainedUnits: kept, retainedVersion: doc.version } } } };
+    }));
+  }
+  for (let i = 0; i < staleCards.length; i += 200) {
+    const docs = await BatchCard.find({ cardId: { $in: staleCards.slice(i, i + 200) } }, { cardId: 1, cardJson: 1 }).lean();
+    await saveFields(BatchCard, docs.map(doc => {
+      let card = null;
+      try { card = JSON.parse(doc.cardJson); } catch (_) { card = null; }
+      const unit = S.cardRetainedUnit(card);
+      if (unit) units.add(unit);
+      return { updateOne: { filter: { cardId: doc.cardId, retainedUnit: { $exists: false } }, update: { $set: { retainedUnit: unit } } } };
+    }));
+  }
+  return units;
+}
+
+// ==========================================
+// GET /api/batch/units — the unit submenus for the project sidebar (plan section 16.3).
+// Never answers 403: the project page logs the user out on any 403, so a user without Batch access gets [].
+// ==========================================
+router.get('/units', async (req, res) => {
+  try {
+    if (!S.hasBatchAccess(req.user)) return res.json({ units: [] });
+    const orders = await generalOrders(req.user, UNIT_ORDER_FIELDS);
+    const [{ usedKeys }, dropdownUnits, kept] = await Promise.all([
+      orderUnits(orders), unitOptions(), retainedUnits(orders.map(o => S.normalizeBookingKey(o.orderNo)))
+    ]);
+    // Same list as GET /state's batchUnits: units of the rows, then units kept by plans and cards.
+    for (const unit of kept) if (!usedKeys.has(unit)) usedKeys.set(unit, unit);
+    res.json({ units: S.orderedUnits(usedKeys, dropdownUnits) });
+  } catch (error) {
+    console.error('Batch units error:', error);
+    res.status(500).json({ message: 'Could not load Batch Plan units.' });
+  }
+});
 
 // ==========================================
 // GET /api/batch/state — everything the Batch Plan page needs (demo appState shape)
@@ -109,24 +191,17 @@ router.get('/state', requireModuleAccess, async (req, res) => {
     const [orders, settings] = await Promise.all([generalOrders(req.user), ensureSettings()]);
     orders.sort((a, b) => String(b.orderNo).localeCompare(String(a.orderNo), undefined, { numeric: true }));
     const keys = orders.map(o => S.normalizeBookingKey(o.orderNo));
-    const orderNos = orders.map(o => o.orderNo);
     const canSetUnits = S.can(req.user, 'menus.dataManagement.unitSetup');
-    const [plans, bpRows, cardDocs, dyeingValid, orderDates, units, buyers] = await Promise.all([
+    const [plans, bpRows, cardDocs, { usedKeys, keysByOrder }, units, buyers] = await Promise.all([
       BatchPlan.find({ orderKey: { $in: keys } }).lean(),
       BatchBpData.find({ orderKey: { $in: keys } }).lean(),
       BatchCard.find({ orderKey: { $in: keys } }).lean(),
-      DeptValidOrders.findOne({ dept: 'dyeing' }).lean(),
-      OrderDate.find({ orderNo: { $in: orderNos } }, { orderNo: 1, dyeing: 1 }).lean(),
+      orderUnits(orders),
       unitOptions(),
       canSetUnits ? buyerNames() : Promise.resolve([])
     ]);
     const planByKey = new Map(plans.map(p => [p.orderKey, p]));
     const settingMap = Object.fromEntries(settings.map(s => [s.key, s]));
-    // Floors follow the Dyeing Plan unit (plan section 15.4). Like the Dyeing Plan list, only orders
-    // in the latest Dyeing file use their Dyeing rows; the others use the General 'Unit'.
-    const dyeingOrders = dyeingValid?.validOrderNos?.length ? new Set(dyeingValid.validOrderNos) : null;
-    const orderDateByNo = new Map(orderDates.map(doc => [doc.orderNo, doc]));
-    const unitDefaults = S.unitDefaultsMap(settingMap.unitSetup?.value);
     const master = [], planVersions = {}, genInfo = {}, knitPlan = {}, bpData = {};
     for (const order of orders) {
       const key = S.normalizeBookingKey(order.orderNo), plan = planByKey.get(key);
@@ -135,11 +210,12 @@ router.get('/state', requireModuleAccess, async (req, res) => {
       master.push({ ...S.bookingFromOrder(order), ...state });
       planVersions[order.orderNo] = plan ? plan.version : 0;
       genInfo[order.orderNo] = { OrderNo: order.orderNo, Buyer: order.buyer || '' };
-      if (Array.isArray(order.knittingItems) && order.knittingItems.length) {
-        const useDyeingRows = (!dyeingOrders || dyeingOrders.has(order.orderNo)) && Array.isArray(order.dyeingItems) && order.dyeingItems.length > 0;
-        const floorOf = S.knittingFloorResolver({ order, orderDate: orderDateByNo.get(order.orderNo), useDyeingRows, unitDefaults });
-        knitPlan[order.orderNo] = S.knittingRowsForDemo(order.knittingItems, floorOf);
-      }
+      // A unit with a confirmed plan keeps its submenu even when no row is on it now: the page keeps such an
+      // order on that unit through its confirmed snapshot rows, so it can still be opened (plan section 16.3).
+      for (const unit of S.planRetainedUnits(state)) if (!usedKeys.has(unit)) usedKeys.set(unit, unit);
+      // Each knitting row's floor = the unit the Dyeing Plan shows for its colour (plan section 16.3).
+      const rowKeys = keysByOrder.get(order.orderNo);
+      if (rowKeys) knitPlan[order.orderNo] = S.knittingRowsForDemo(order.knittingItems, (row, index) => (rowKeys[index] ? S.unitRowText(rowKeys[index]) : ''));
     }
     const orderNoByKey = new Map(orders.map(o => [S.normalizeBookingKey(o.orderNo), o.orderNo]));
     for (const doc of bpRows) {
@@ -148,6 +224,12 @@ router.get('/state', requireModuleAccess, async (req, res) => {
     }
     const cards = [];
     for (const doc of cardDocs) { try { cards.push(JSON.parse(doc.cardJson)); } catch (_) { /* skip damaged record */ } }
+    // A unit that still has a batch card that is not superseded keeps its submenu, so the card stays reachable.
+    for (const card of cards) {
+      const unit = S.cardRetainedUnit(card);
+      if (unit && !usedKeys.has(unit)) usedKeys.set(unit, unit);
+    }
+    const batchUnits = S.orderedUnits(usedKeys, units);
     res.json({
       user: { username: req.user.username, role: req.user.role, permissions: req.user.permissions || {} },
       master, planVersions,
@@ -155,6 +237,8 @@ router.get('/state', requireModuleAccess, async (req, res) => {
       setup: settingMap.setup?.value || [], flatAllowance: settingMap.flatAllowance?.value || [], unitSetup: settingMap.unitSetup?.value || [],
       settingVersions: { setup: settingMap.setup?.version || 0, flatAllowance: settingMap.flatAllowance?.version || 0, unitSetup: settingMap.unitSetup?.version || 0 },
       cards,
+      // The unit submenus, [{key, label}] (plan section 16.3).
+      batchUnits,
       // Unit Setup page: the Dropdown Master units and every buyer (buyers only for users who can edit Unit Setup).
       units, buyers
     });
@@ -242,12 +326,14 @@ router.post('/commit', requireModuleAccess, parseJson, async (req, res) => {
     const planVersions = {}, settingVersions = {};
     for (const write of planWrites) {
       const stateJson = JSON.stringify(write.newState);
+      // The units this plan keeps in the sidebar, for GET /units (retainedUnits above).
+      const retained = { retainedUnits: S.planRetainedUnits(write.newState), retainedVersion: write.version + 1 };
       if (write.existing) {
         const result = await BatchPlan.updateOne({ orderKey: write.orderKey, version: write.version },
-          { $set: { stateJson, orderNo: write.orderNo, updatedBy: username }, $inc: { version: 1 } });
+          { $set: { stateJson, orderNo: write.orderNo, updatedBy: username, ...retained }, $inc: { version: 1 } });
         if (!result.matchedCount) return res.status(409).json({ code: 'CONFLICT', message: 'Order ' + write.orderNo + ' was changed by another user. Reload the page to see the latest plan.' });
       } else {
-        try { await BatchPlan.create({ orderKey: write.orderKey, orderNo: write.orderNo, stateJson, version: 1, updatedBy: username }); }
+        try { await BatchPlan.create({ orderKey: write.orderKey, orderNo: write.orderNo, stateJson, version: 1, updatedBy: username, ...retained }); }
         catch (error) {
           if (error.code === 11000) return res.status(409).json({ code: 'CONFLICT', message: 'Order ' + write.orderNo + ' was changed by another user. Reload the page to see the latest plan.' });
           throw error;
@@ -263,7 +349,7 @@ router.post('/commit', requireModuleAccess, parseJson, async (req, res) => {
     }
     for (const card of cards) {
       await BatchCard.updateOne({ cardId: card.id },
-        { $set: { cardJson: JSON.stringify(card), orderKey: S.normalizeBookingKey(card.number), updatedBy: username } }, { upsert: true });
+        { $set: { cardJson: JSON.stringify(card), orderKey: S.normalizeBookingKey(card.number), updatedBy: username, retainedUnit: S.cardRetainedUnit(card) } }, { upsert: true });
     }
     res.json({ planVersions, settingVersions });
   } catch (error) {

@@ -1126,8 +1126,9 @@ async function processDeptFile(sheetData, dept) {
     };
 
     // Extract buyer from first item if available.
-    // It only fills an order that has no buyer yet, so the General file's buyer is never
-    // replaced by a department file (for example by "PENDING"). Applied after the item update.
+    // It only fills an order that has no real buyer yet (empty, or a placeholder such as
+    // "PENDING"), so the General file's buyer is never replaced by a department file.
+    // Applied after the item update.
     if (items.length > 0) {
       const km = buildKeyMap(items[0]);
       const buyer = String(
@@ -1139,7 +1140,7 @@ async function processDeptFile(sheetData, dept) {
       if (buyer && buyer !== "UNDEFINED" && buyer !== "N/A" && buyer !== "") {
         buyerFillOps.push({
           updateOne: {
-            filter: { orderNo, $or: [{ buyer: { $exists: false } }, { buyer: null }, { buyer: "" }] },
+            filter: { orderNo, $or: [{ buyer: { $exists: false } }, { buyer: null }, { buyer: "" }, { buyer: { $in: ["PENDING", "UNKNOWN", "GENERAL"] } }] },
             update: { $set: { buyer } },
           },
         });

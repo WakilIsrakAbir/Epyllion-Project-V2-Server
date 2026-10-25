@@ -1,15 +1,18 @@
 /* Batch Plan module API (/api/batch).
-   Additive: reads Order / DeptValidOrders, writes only the new Batch* collections. */
+   Additive: reads Order / DeptValidOrders / OrderDate / DropdownMaster, writes only the new Batch* collections. */
 const express = require('express');
 const router = express.Router();
 const Order = require('../models/Order');
 const DeptValidOrders = require('../models/DeptValidOrders');
+const OrderDate = require('../models/OrderDate');
+const DropdownMaster = require('../models/DropdownMaster');
 const BatchPlan = require('../models/BatchPlan');
 const BatchSetting = require('../models/BatchSetting');
 const BatchCard = require('../models/BatchCard');
 const BatchBpData = require('../models/BatchBpData');
 const { authenticateToken } = require('../middleware/auth');
 const S = require('../lib/batch/source');
+const SETUP_DEFAULTS = require('../lib/batch/setup-defaults');
 
 // Plan snapshots can be large; this router parses its own JSON (mounted before the global parser).
 // The token is checked first, so only signed-in users can send a large body.
@@ -43,17 +46,46 @@ async function allowedBuyerSet(user) {
   return new Set(raw.filter(b => perms.buyerIds.includes(String(b).toLowerCase().replace(/[^a-z0-9]/g, ''))));
 }
 
-// Setup tables (Dyeing MC, Flat Allowance, Unit Setup) start empty and are filled on the Setup pages.
-// The empty record gives each table a version, so the first save works like every later one.
+/* Setup tables (Dyeing MC, Flat Allowance, Unit Setup) start with the demo's defaults (plan section 15.3).
+   A missing table is created with them. A table that is still the empty record no user ever saved
+   (version 1, updatedBy 'system') is filled once; its version goes up, so a page opened before that
+   gets the "changed by another user" message instead of saving the empty table again.
+   A table a user has saved (version 2 or more) is never touched, even when it is empty. */
 async function ensureSettings() {
   const existing = await BatchSetting.find({}).lean();
-  const have = new Set(existing.map(s => s.key));
+  const byKey = new Map(existing.map(s => [s.key, s]));
   for (const key of ['setup', 'flatAllowance', 'unitSetup']) {
-    if (have.has(key)) continue;
-    try { await BatchSetting.create({ key, value: [], version: 1, updatedBy: 'system' }); }
-    catch (error) { if (error.code !== 11000) throw error; }
+    const doc = byKey.get(key);
+    if (!doc) {
+      try { await BatchSetting.create({ key, value: SETUP_DEFAULTS[key], version: 1, updatedBy: 'system' }); }
+      catch (error) { if (error.code !== 11000) throw error; }
+    } else if (doc.version === 1 && doc.updatedBy === 'system' && Array.isArray(doc.value) && doc.value.length === 0) {
+      await BatchSetting.updateOne({ key, version: 1, updatedBy: 'system', value: { $size: 0 } },
+        { $set: { value: SETUP_DEFAULTS[key] }, $inc: { version: 1 } });
+    }
   }
   return BatchSetting.find({}).lean();
+}
+
+// Units for Unit Setup: Dropdown Master Setup's UNIT list (ACTIVE and HIDDEN, in its own order).
+// Same defaults as routes/dropdowns.js when that list was never created; nothing is written here.
+const DEFAULT_UNITS = ['EFL', 'EKL', 'Ext', 'Outside'];
+async function unitOptions() {
+  const docs = await DropdownMaster.find({ type: 'UNIT' }, { name: 1, status: 1 }).sort({ createdAt: 1 }).lean();
+  if (!docs.length) return DEFAULT_UNITS.map(name => ({ name, status: 'ACTIVE' }));
+  return docs.map(doc => ({ name: String(doc.name || '').trim(), status: doc.status || 'ACTIVE' })).filter(unit => unit.name);
+}
+
+// Every buyer in the uploaded orders, once, for Unit Setup (plan section 15.5).
+const NOT_A_BUYER = new Set(['', 'UNDEFINED', 'N/A', 'GENERAL', 'PENDING', 'UNKNOWN']);
+async function buyerNames() {
+  const names = new Map();
+  for (const value of await Order.distinct('buyer')) {
+    const name = String(value ?? '').trim().replace(/\s+/g, ' ');
+    const key = S.unitBuyerKey(name);
+    if (!NOT_A_BUYER.has(key) && !names.has(key)) names.set(key, name);
+  }
+  return Array.from(names.values()).sort((a, b) => a.localeCompare(b));
 }
 
 async function generalOrders(user) {
@@ -65,7 +97,7 @@ async function generalOrders(user) {
     orderNo: 1, buyer: 1, buyerTeam: 1, bookingDate: 1, eventDay: 1, style: 1, pmc: 1, bookedBy: 1, bookingBy: 1,
     floor: 1, gmtUnit: 1, brush: 1, peach: 1, heatset: 1, knitStart: 1, knitEnd: 1, dyeStart: 1, dyeEnd: 1,
     deliStart: 1, deliEnd: 1, ship1: 1, shipLast: 1, fabricNotes: 1, pmcNotes: 1,
-    knittingPlanStatus: 1, dyeingPlanStatus: 1, deliveryPlanStatus: 1, knittingItems: 1
+    knittingPlanStatus: 1, dyeingPlanStatus: 1, deliveryPlanStatus: 1, knittingItems: 1, dyeingItems: 1
   }).lean();
 }
 
@@ -77,12 +109,24 @@ router.get('/state', requireModuleAccess, async (req, res) => {
     const [orders, settings] = await Promise.all([generalOrders(req.user), ensureSettings()]);
     orders.sort((a, b) => String(b.orderNo).localeCompare(String(a.orderNo), undefined, { numeric: true }));
     const keys = orders.map(o => S.normalizeBookingKey(o.orderNo));
-    const [plans, bpRows, cardDocs] = await Promise.all([
+    const orderNos = orders.map(o => o.orderNo);
+    const canSetUnits = S.can(req.user, 'menus.dataManagement.unitSetup');
+    const [plans, bpRows, cardDocs, dyeingValid, orderDates, units, buyers] = await Promise.all([
       BatchPlan.find({ orderKey: { $in: keys } }).lean(),
       BatchBpData.find({ orderKey: { $in: keys } }).lean(),
-      BatchCard.find({ orderKey: { $in: keys } }).lean()
+      BatchCard.find({ orderKey: { $in: keys } }).lean(),
+      DeptValidOrders.findOne({ dept: 'dyeing' }).lean(),
+      OrderDate.find({ orderNo: { $in: orderNos } }, { orderNo: 1, dyeing: 1 }).lean(),
+      unitOptions(),
+      canSetUnits ? buyerNames() : Promise.resolve([])
     ]);
     const planByKey = new Map(plans.map(p => [p.orderKey, p]));
+    const settingMap = Object.fromEntries(settings.map(s => [s.key, s]));
+    // Floors follow the Dyeing Plan unit (plan section 15.4). Like the Dyeing Plan list, only orders
+    // in the latest Dyeing file use their Dyeing rows; the others use the General 'Unit'.
+    const dyeingOrders = dyeingValid?.validOrderNos?.length ? new Set(dyeingValid.validOrderNos) : null;
+    const orderDateByNo = new Map(orderDates.map(doc => [doc.orderNo, doc]));
+    const unitDefaults = S.unitDefaultsMap(settingMap.unitSetup?.value);
     const master = [], planVersions = {}, genInfo = {}, knitPlan = {}, bpData = {};
     for (const order of orders) {
       const key = S.normalizeBookingKey(order.orderNo), plan = planByKey.get(key);
@@ -91,14 +135,17 @@ router.get('/state', requireModuleAccess, async (req, res) => {
       master.push({ ...S.bookingFromOrder(order), ...state });
       planVersions[order.orderNo] = plan ? plan.version : 0;
       genInfo[order.orderNo] = { OrderNo: order.orderNo, Buyer: order.buyer || '' };
-      if (Array.isArray(order.knittingItems) && order.knittingItems.length) knitPlan[order.orderNo] = S.knittingRowsForDemo(order.knittingItems);
+      if (Array.isArray(order.knittingItems) && order.knittingItems.length) {
+        const useDyeingRows = (!dyeingOrders || dyeingOrders.has(order.orderNo)) && Array.isArray(order.dyeingItems) && order.dyeingItems.length > 0;
+        const floorOf = S.knittingFloorResolver({ order, orderDate: orderDateByNo.get(order.orderNo), useDyeingRows, unitDefaults });
+        knitPlan[order.orderNo] = S.knittingRowsForDemo(order.knittingItems, floorOf);
+      }
     }
     const orderNoByKey = new Map(orders.map(o => [S.normalizeBookingKey(o.orderNo), o.orderNo]));
     for (const doc of bpRows) {
       const orderNo = orderNoByKey.get(doc.orderKey) || doc.orderNo;
       (bpData[orderNo] = bpData[orderNo] || []).push(doc.row || {});
     }
-    const settingMap = Object.fromEntries(settings.map(s => [s.key, s]));
     const cards = [];
     for (const doc of cardDocs) { try { cards.push(JSON.parse(doc.cardJson)); } catch (_) { /* skip damaged record */ } }
     res.json({
@@ -107,7 +154,9 @@ router.get('/state', requireModuleAccess, async (req, res) => {
       datasets: { genInfo, knitPlan, bpData },
       setup: settingMap.setup?.value || [], flatAllowance: settingMap.flatAllowance?.value || [], unitSetup: settingMap.unitSetup?.value || [],
       settingVersions: { setup: settingMap.setup?.version || 0, flatAllowance: settingMap.flatAllowance?.version || 0, unitSetup: settingMap.unitSetup?.version || 0 },
-      cards
+      cards,
+      // Unit Setup page: the Dropdown Master units and every buyer (buyers only for users who can edit Unit Setup).
+      units, buyers
     });
   } catch (error) {
     console.error('Batch state error:', error);
@@ -169,6 +218,11 @@ router.post('/commit', requireModuleAccess, parseJson, async (req, res) => {
       const existing = await BatchSetting.findOne({ key }).lean();
       if ((existing?.version || 0) !== Number(entry.version)) {
         return res.status(409).json({ code: 'CONFLICT', message: 'This Setup table was changed by another user. Reload the page to see the latest values.' });
+      }
+      if (key === 'unitSetup') {
+        const activeUnits = (await unitOptions()).filter(unit => unit.status === 'ACTIVE').map(unit => unit.name);
+        const unitError = S.unitSetupError(entry.value, existing?.value || [], activeUnits);
+        if (unitError) return res.status(400).json({ message: unitError });
       }
       settingWrites.push({ key, value: entry.value, version: existing?.version || 0 });
     }

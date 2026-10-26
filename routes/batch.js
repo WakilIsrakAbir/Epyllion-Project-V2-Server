@@ -106,15 +106,22 @@ async function generalOrders(user, fields = ORDER_FIELDS) {
 
 /* Units of these orders' knitting rows, from the Dyeing Plan unit (plan section 16.3), and the data they
    need: the latest Dyeing file's order list and the saved Dyeing Plan units. */
-async function orderUnits(orders) {
+// Only what the Dyeing screen's unit rule reads from a saved Dyeing row (lib/batch/source.js dyeingScreenUnits).
+const UNIT_DATE_FIELDS = { orderNo: 1, 'dyeing.itemId': 1, 'dyeing.itemData.Unit': 1, 'dyeing.itemData.Color': 1 };
+// For GET /state also the saved plan dates (lib/batch/source.js modulePlanDates, plan section 17).
+const PLAN_DATE_FIELDS = { ...UNIT_DATE_FIELDS,
+  'knitting.planType': 1, 'knitting.startDate': 1, 'knitting.endDate': 1,
+  'dyeing.planType': 1, 'dyeing.startDate': 1, 'dyeing.endDate': 1,
+  'delivery.planType': 1, 'delivery.floorPlanType': 1, 'delivery.startDate': 1, 'delivery.endDate': 1, 'delivery.floorStartDate': 1, 'delivery.floorEndDate': 1 };
+async function orderUnits(orders, fields = UNIT_DATE_FIELDS) {
   const [dyeingValid, orderDates] = await Promise.all([
     DeptValidOrders.findOne({ dept: 'dyeing' }).lean(),
-    // Only what the Dyeing screen's unit rule reads from a saved Dyeing row (lib/batch/source.js dyeingScreenUnits).
-    OrderDate.find({ orderNo: { $in: orders.map(o => o.orderNo) } }, { orderNo: 1, 'dyeing.itemId': 1, 'dyeing.itemData.Unit': 1, 'dyeing.itemData.Color': 1 }).lean()
+    OrderDate.find({ orderNo: { $in: orders.map(o => o.orderNo) } }, fields).lean()
   ]);
   // Like the Dyeing Plan list, only orders in the latest Dyeing file use their Dyeing rows; the others use the General 'Unit'.
   const dyeingOrders = dyeingValid?.validOrderNos?.length ? new Set(dyeingValid.validOrderNos) : null;
-  return S.unitsForOrders(orders, { orderDateByNo: new Map(orderDates.map(doc => [doc.orderNo, doc])), dyeingOrders });
+  const orderDateByNo = new Map(orderDates.map(doc => [doc.orderNo, doc]));
+  return { ...S.unitsForOrders(orders, { orderDateByNo, dyeingOrders }), orderDateByNo };
 }
 
 /* Units that these orders' saved plans and cards keep in the sidebar: the same rules as GET /state
@@ -192,11 +199,11 @@ router.get('/state', requireModuleAccess, async (req, res) => {
     orders.sort((a, b) => String(b.orderNo).localeCompare(String(a.orderNo), undefined, { numeric: true }));
     const keys = orders.map(o => S.normalizeBookingKey(o.orderNo));
     const canSetUnits = S.can(req.user, 'menus.dataManagement.unitSetup');
-    const [plans, bpRows, cardDocs, { usedKeys, keysByOrder }, units, buyers] = await Promise.all([
+    const [plans, bpRows, cardDocs, { usedKeys, keysByOrder, orderDateByNo }, units, buyers] = await Promise.all([
       BatchPlan.find({ orderKey: { $in: keys } }).lean(),
       BatchBpData.find({ orderKey: { $in: keys } }).lean(),
       BatchCard.find({ orderKey: { $in: keys } }).lean(),
-      orderUnits(orders),
+      orderUnits(orders, PLAN_DATE_FIELDS),
       unitOptions(),
       canSetUnits ? buyerNames() : Promise.resolve([])
     ]);
@@ -207,7 +214,7 @@ router.get('/state', requireModuleAccess, async (req, res) => {
       const key = S.normalizeBookingKey(order.orderNo), plan = planByKey.get(key);
       let state = {};
       if (plan) { try { state = JSON.parse(plan.stateJson || '{}'); } catch (_) { state = {}; } }
-      master.push({ ...S.bookingFromOrder(order), ...state });
+      master.push({ ...S.bookingFromOrder(order, S.modulePlanDates(orderDateByNo.get(order.orderNo))), ...state });
       planVersions[order.orderNo] = plan ? plan.version : 0;
       genInfo[order.orderNo] = { OrderNo: order.orderNo, Buyer: order.buyer || '' };
       // A unit with a confirmed plan keeps its submenu even when no row is on it now: the page keeps such an

@@ -194,8 +194,14 @@ router.get('/units', async (req, res) => {
 // GET /api/batch/state — everything the Batch Plan page needs (demo appState shape)
 // ==========================================
 router.get('/state', requireModuleAccess, async (req, res) => {
+  // Plan section 18.10: the time of each phase goes into a Server-Timing header (DevTools > Network, and the
+  // page's load summary), so a slow load can be traced to the database, the build or the download.
+  const started = Date.now(), phases = [];
+  let mark = started;
+  const phase = name => { const now = Date.now(); phases.push(name + ';dur=' + (now - mark)); mark = now; };
   try {
     const [orders, settings] = await Promise.all([generalOrders(req.user), ensureSettings()]);
+    phase('orders');
     orders.sort((a, b) => String(b.orderNo).localeCompare(String(a.orderNo), undefined, { numeric: true }));
     const keys = orders.map(o => S.normalizeBookingKey(o.orderNo));
     const canSetUnits = S.can(req.user, 'menus.dataManagement.unitSetup');
@@ -207,6 +213,7 @@ router.get('/state', requireModuleAccess, async (req, res) => {
       unitOptions(),
       canSetUnits ? buyerNames() : Promise.resolve([])
     ]);
+    phase('plans');
     const planByKey = new Map(plans.map(p => [p.orderKey, p]));
     const settingMap = Object.fromEntries(settings.map(s => [s.key, s]));
     const master = [], planVersions = {}, genInfo = {}, knitPlan = {}, bpData = {};
@@ -237,18 +244,29 @@ router.get('/state', requireModuleAccess, async (req, res) => {
       if (unit && !usedKeys.has(unit)) usedKeys.set(unit, unit);
     }
     const batchUnits = S.orderedUnits(usedKeys, units);
-    res.json({
+    phase('build');
+    const body = JSON.stringify({
       user: { username: req.user.username, role: req.user.role, permissions: req.user.permissions || {} },
       master, planVersions,
       datasets: { genInfo, knitPlan, bpData },
       setup: settingMap.setup?.value || [], flatAllowance: settingMap.flatAllowance?.value || [], unitSetup: settingMap.unitSetup?.value || [],
       settingVersions: { setup: settingMap.setup?.version || 0, flatAllowance: settingMap.flatAllowance?.version || 0, unitSetup: settingMap.unitSetup?.version || 0 },
       cards,
-      // The unit submenus, [{key, label}] (plan section 16.3).
+      // The unit tabs in the page heading, [{key, label}] (plan sections 16.3 and 18).
       batchUnits,
       // Unit Setup page: the Dropdown Master units and every buyer (buyers only for users who can edit Unit Setup).
       units, buyers
     });
+    phase('json');
+    phases.push('total;dur=' + (Date.now() - started), 'orders-count;desc="' + orders.length + ' orders, ' + Math.round(body.length / 1024) + ' KB"');
+    res.set({
+      'Server-Timing': phases.join(', '),
+      // Lets the page read the timings and the response size from a different origin (the frontend host).
+      'Access-Control-Expose-Headers': 'Server-Timing',
+      'Timing-Allow-Origin': '*',
+      'Cache-Control': 'no-store'
+    });
+    res.type('application/json').send(body);
   } catch (error) {
     console.error('Batch state error:', error);
     res.status(500).json({ message: 'Could not load Batch Plan data.' });

@@ -116,6 +116,10 @@ router.get('/stats', requireMonitorAccess, async (req, res) => {
         lastAt: { $first: '$createdAt' }, lastBy: { $first: '$uploadedBy' }, lastName: { $first: '$originalName' }
       } }
     ]).toArray();
+    // Whether each department's file was ever uploaded, so the page can tell "no file yet"
+    // (Finishing, for one) apart from "a file with no orders".
+    const uploadedCategories = new Set(history.map(h => String(h._id).toLowerCase()));
+    const fileUploaded = Object.fromEntries(DEPTS.map(dept => [dept, uploadedCategories.has(dept) || dept in valid]));
     const copies = await db.collection('uploads.files').aggregate([
       { $group: { _id: { $ifNull: ['$metadata.category', 'General'] }, copies: { $sum: 1 }, bytes: { $sum: '$length' } } }
     ]).toArray();
@@ -159,7 +163,7 @@ router.get('/stats', requireMonitorAccess, async (req, res) => {
         objects: st.objects, collections: names.length, limitBytes: LIMIT_BYTES
       },
       collections,
-      orders: { total: ordersTotal, active: ordersActive, departments },
+      orders: { total: ordersTotal, active: ordersActive, departments, fileUploaded },
       plans: { saved: savedPlans, completed },
       users: { total: usersTotal, online: usersOnline },
       uploads: { categories, perDay },

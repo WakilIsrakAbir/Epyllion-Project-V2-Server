@@ -10,6 +10,8 @@ const DeptValidOrders = require("../models/DeptValidOrders");
 // Batch Plan module (additive): BP Data storage
 const BatchBpData = require("../models/BatchBpData");
 const batchSource = require("../lib/batch/source");
+// Stored Excel copies: the newest 3 per category are kept, the upload history never deleted
+const retention = require("../lib/file-retention");
 const { authenticateToken } = require("../middleware/auth");
 
 // Protect all upload and file endpoints with token authentication
@@ -81,6 +83,21 @@ router.post("/upload", upload.single("document"), async (req, res) => {
       }
     }
 
+    // A General or department file without a single order number would change nothing: it is not stored.
+    let orderCount;
+    if (category !== "BP") {
+      try {
+        orderCount = orderRowCount(XLSX.readFile(req.file.path));
+      } catch (readErr) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(400).json({ message: "Sheet parsing error: " + readErr.message + ". Nothing was saved." });
+      }
+      if (!orderCount) {
+        try { fs.unlinkSync(req.file.path); } catch (_) {}
+        return res.status(400).json({ message: "No order numbers were found on the first sheet (OrderNo / BookingNo column). Nothing was saved." });
+      }
+    }
+
     // File stream disk theke GridFS-e pipe kori
     const uploadStream = bucket.openUploadStream(savedName, {
       contentType: req.file.mimetype,
@@ -125,15 +142,24 @@ router.post("/upload", upload.single("document"), async (req, res) => {
       );
       console.log(`✅ Excel parsed and stored in Order collection`);
     } catch (parseErr) {
-      console.error(
-        "Excel parse warning (file still uploaded):",
-        parseErr.message,
-      );
+      // The upload is kept in the history as failed: it is never "in use" and nothing is removed for it.
+      console.error("Excel parse error:", parseErr.message);
+      await File.updateOne({ _id: newFile._id }, { $set: { parseStatus: "failed", parseError: String(parseErr.message || parseErr) } });
+      return res.status(422).json({ message: `The file was saved but could not be read: ${parseErr.message}. Please check the file and upload it again.` });
+    }
+    await File.updateOne({ _id: newFile._id }, { $set: { parseStatus: "ok", ...(orderCount !== undefined ? { orderCount } : {}) } });
+
+    // Keep only the newest copies of this category (the upload history itself is never deleted).
+    let copiesRemoved = 0;
+    try {
+      copiesRemoved = await retention.keepLatestCopies(category || "General");
+    } catch (retentionErr) {
+      console.error("Old file copies were not removed:", retentionErr.message);
     }
 
     return res
       .status(200)
-      .json({ message: "File Uploaded and History Saved!", file: newFile });
+      .json({ message: "File Uploaded and History Saved!", file: newFile, copiesRemoved });
   } catch (error) {
     console.error("Upload Error:", error);
     res.status(500).json({ message: "Server Error during upload" });
@@ -205,38 +231,31 @@ router.get("/download/:filename", async (req, res) => {
 //  A full restore, if ever needed, is done from a backup: scripts/restore-backup.js.)
 
 // ==========================================
-// API 3: Delete Single File (GridFS + metadata)
+// API 3: Remove the stored copy of one upload (Admin or actions.deleteFiles)
+// The upload record stays as history and no planning data is touched. The upload in use
+// (its category's newest successful upload) cannot be removed.
 // ==========================================
 router.delete("/:id", async (req, res) => {
   try {
+    if (!batchSource.can(req.user, "actions.deleteFiles")) {
+      return res.status(403).json({ message: "You do not have permission to delete uploaded files." });
+    }
     const fileId = req.params.id;
-    const fileRecord = await File.findById(fileId);
-
+    if (!mongoose.isValidObjectId(fileId)) {
+      return res.status(404).json({ message: "File not found in database" });
+    }
+    const fileRecord = await File.findById(fileId).lean();
     if (!fileRecord) {
       return res.status(404).json({ message: "File not found in database" });
     }
-
-    // GridFS theke file delete kori
-    const bucket = getGridFSBucket();
-    if (bucket) {
-      try {
-        const gridFSFiles = await mongoose.connection.db
-          .collection("uploads.files")
-          .find({ filename: fileRecord.savedName })
-          .toArray();
-
-        for (const f of gridFSFiles) {
-          await bucket.delete(f._id);
-        }
-        console.log(`✅ Deleted from GridFS: ${fileRecord.savedName}`);
-      } catch (gridErr) {
-        console.log("GridFS delete warning:", gridErr.message);
-      }
+    if (fileRecord.blobDeleted) {
+      return res.status(200).json({ message: "The stored copy was already removed. The upload history is kept.", alreadyRemoved: true });
     }
-
-    // File metadata delete
-    await File.findByIdAndDelete(fileId);
-    res.status(200).json({ message: "File deleted successfully" });
+    if (await retention.isInUse(fileRecord)) {
+      return res.status(409).json({ message: `This is the ${fileRecord.category || "General"} file in use (the latest upload), so it is kept. Upload a newer file first.`, inUse: true });
+    }
+    await retention.removeCopy(fileRecord, `removed by ${req.user.username || "unknown"}`);
+    res.status(200).json({ message: "The stored copy was removed. The upload history and all planning data stay." });
   } catch (error) {
     console.error("Delete Error:", error);
     res.status(500).json({ message: "Server Error during deletion" });
@@ -493,6 +512,19 @@ function getVal(row, keys, rowKeyMap) {
     }
   }
   return "";
+}
+
+// Rows with an order number on the first sheet of a General or department workbook, counted the same way the
+// parser reads them. 0 means the file would change nothing, so it is not stored.
+function orderRowCount(wb) {
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  if (!sheet) return 0;
+  let n = 0;
+  for (const row of XLSX.utils.sheet_to_json(sheet, { defval: "" })) {
+    const orderNo = String(getVal(row, ["OrderNo", "BookingNo", "EWO", "Booking", "Order No", "Booking No"], buildKeyMap(row))).trim();
+    if (orderNo && orderNo !== "undefined") n++;
+  }
+  return n;
 }
 
 // Helper: build normalized key map for a row

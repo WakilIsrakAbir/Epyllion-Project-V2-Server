@@ -43,7 +43,10 @@ try {
     // Dropdown Master Setup API
     const dropdownRoutes = require('./routes/dropdowns');
     app.use('/api/dropdowns', dropdownRoutes);
-    
+
+    // Atlas Monitor (database health) and database backup download
+    app.use('/api/monitor', require('./routes/monitor'));
+
     // GridFS File Serving Route
     // Protected by authenticateToken
     let serverGfsBucket;

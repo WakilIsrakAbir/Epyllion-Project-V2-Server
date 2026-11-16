@@ -7,13 +7,10 @@ const File = require("../models/File");
 const OrderDate = require("../models/OrderDate");
 const Order = require("../models/Order");
 const DeptValidOrders = require("../models/DeptValidOrders");
-const User = require("../models/User");
 // Batch Plan module (additive): BP Data storage
 const BatchBpData = require("../models/BatchBpData");
-const BatchPlan = require("../models/BatchPlan");
-const BatchCard = require("../models/BatchCard");
 const batchSource = require("../lib/batch/source");
-const { authenticateToken, requireAdmin } = require("../middleware/auth");
+const { authenticateToken } = require("../middleware/auth");
 
 // Protect all upload and file endpoints with token authentication
 router.use(authenticateToken);
@@ -204,61 +201,8 @@ router.get("/download/:filename", async (req, res) => {
   }
 });
 
-// ==========================================
-// SUPER API: Clear Entire Database & All GridFS Files (Total Wipe - Admin Only)
-// ==========================================
-router.delete("/clear-all-planning", requireAdmin, async (req, res) => {
-  try {
-    const { adminPassword } = req.body;
-    if (!adminPassword) {
-      return res
-        .status(400)
-        .json({
-          message: "Admin password is required to clear planning data.",
-        });
-    }
-
-    const adminUser = await User.findById(req.user._id).select("+password");
-    if (!adminUser) {
-      return res.status(404).json({ message: "Admin user not found." });
-    }
-
-    const isMatch = await adminUser.comparePassword(adminPassword);
-    if (!isMatch) {
-      return res
-        .status(403)
-        .json({ message: "Invalid admin password. Action aborted." });
-    }
-
-    // 1. OrderDate collection clear
-    await OrderDate.deleteMany({});
-
-    // Batch Plan module data (Setup tables are kept)
-    await BatchBpData.deleteMany({});
-    await BatchPlan.deleteMany({});
-    await BatchCard.deleteMany({});
-
-    // 2. File metadata collection clear
-    await File.deleteMany({});
-
-    // 3. GridFS collections clear (uploads.files + uploads.chunks)
-    const db = mongoose.connection.db;
-    try {
-      await db.collection("uploads.files").deleteMany({});
-      await db.collection("uploads.chunks").deleteMany({});
-      console.log("✅ GridFS files cleared");
-    } catch (gridErr) {
-      console.log("GridFS collections may not exist yet:", gridErr.message);
-    }
-
-    res
-      .status(200)
-      .json({ message: "Entire database and all files cleared successfully" });
-  } catch (error) {
-    console.error("Clear DB Error:", error);
-    res.status(500).json({ message: "Error: " + error.message });
-  }
-});
+// (The "clear-all-planning" total-wipe endpoint was removed on 16 Nov 2026: too dangerous to keep.
+//  A full restore, if ever needed, is done from a backup: scripts/restore-backup.js.)
 
 // ==========================================
 // API 3: Delete Single File (GridFS + metadata)

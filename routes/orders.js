@@ -1419,31 +1419,54 @@ function normalizeItemRow(rawItem, dept) {
 }
 
 // ==========================================
-// GET /api/orders/report-download/:dept — Generate and download Excel report directly
-// Uses projection to minimize data loaded from MongoDB
+// GET /api/orders/report-download/:dept — Updated report (Confirm + Tentative; Delivery and YD also Pending)
+// GET /api/orders/pending-download/:dept — Pending orders only, same columns as the Updated report
+// Both build the Excel file on the server, using projection and chunking to minimize memory load
 // ==========================================
-// ==========================================
-// GET /api/orders/report-download/:dept — Generate and download Excel report directly
-// Uses projection and chunking to minimize memory load
-// ==========================================
-router.get("/report-download/:dept", async (req, res) => {
+const REPORT_DEPTS = ["yd", "knitting", "dyeing", "finishing", "delivery"];
+
+router.get("/report-download/:dept", (req, res) =>
+  sendDeptReport(req, res, { pendingOnly: false }),
+);
+router.get("/pending-download/:dept", (req, res) =>
+  sendDeptReport(req, res, { pendingOnly: true }),
+);
+
+async function sendDeptReport(req, res, { pendingOnly }) {
   try {
     const XLSX = require("xlsx");
     const { dept } = req.params;
+    if (!REPORT_DEPTS.includes(dept)) {
+      return res.status(400).json({ message: "Unknown department" });
+    }
 
     const statusField = `${dept}PlanStatus`;
     const itemsField = `${dept}Items`;
 
-    // Department-specific status filter:
-    // Delivery: Pending + Confirm + Tentative
-    // Knitting/Dyeing/YD/Finishing: Confirm + Tentative only
-    const statusList =
-      dept === "delivery" || dept === "yd"
-        ? ["Pending", "Confirm", "Tentative"]
-        : ["Confirm", "Tentative"];
-    const filter = {
-      [statusField]: { $in: statusList },
-    };
+    let filter;
+    if (pendingOnly) {
+      // Same orders as the Pending list of Order Management for this department
+      filter = {
+        $or: [
+          { [statusField]: "Pending" },
+          { [statusField]: { $exists: false } },
+          { [statusField]: null },
+          { [statusField]: "" },
+        ],
+        [itemsField]: { $exists: true, $ne: [] },
+      };
+    } else {
+      // Department-specific status filter:
+      // Delivery: Pending + Confirm + Tentative
+      // Knitting/Dyeing/YD/Finishing: Confirm + Tentative only
+      const statusList =
+        dept === "delivery" || dept === "yd"
+          ? ["Pending", "Confirm", "Tentative"]
+          : ["Confirm", "Tentative"];
+      filter = {
+        [statusField]: { $in: statusList },
+      };
+    }
 
     // Only include orders from uploaded file
     const deptValid = await DeptValidOrders.findOne({ dept }).lean();
@@ -1508,16 +1531,15 @@ router.get("/report-download/:dept", async (req, res) => {
         orderItemProjection.knittingItems = 1;
         orderItemProjection.dyeingItems = 1;
       }
+      // Pending report: an order never planned here has no saved rows, so its uploaded items are needed
+      if (pendingOnly) orderItemProjection[itemsField] = 1;
+
+      const planDocFilter = { orderNo: { $in: chunkOrderNos } };
+      if (!pendingOnly) planDocFilter[dept] = { $exists: true, $ne: [] };
 
       const [planDocsChunk, orderItemsDocs] = await Promise.all([
-        OrderDate.find(
-          {
-            orderNo: { $in: chunkOrderNos },
-            [dept]: { $exists: true, $ne: [] },
-          },
-          planProjection,
-        ).lean(),
-        ["knitting", "dyeing", "delivery"].includes(dept)
+        OrderDate.find(planDocFilter, planProjection).lean(),
+        pendingOnly || ["knitting", "dyeing", "delivery"].includes(dept)
           ? Order.find(
               { orderNo: { $in: chunkOrderNos } },
               orderItemProjection,
@@ -1529,10 +1551,12 @@ router.get("/report-download/:dept", async (req, res) => {
       const orderKnitMap = {};
       const orderDyeMap = {};
       const orderDeliMap = {};
+      const uploadedItemsMap = {};
       orderItemsDocs.forEach((d) => {
         if (d.knittingItems) orderKnitMap[d.orderNo] = d.knittingItems;
         if (d.dyeingItems) orderDyeMap[d.orderNo] = d.dyeingItems;
         if (d.deliveryItems) orderDeliMap[d.orderNo] = d.deliveryItems;
+        uploadedItemsMap[d.orderNo] = d[itemsField] || [];
         if (dept === "knitting")
           orderItemsMap[d.orderNo] = d.knittingItems || [];
         else if (dept === "dyeing")
@@ -1541,7 +1565,26 @@ router.get("/report-download/:dept", async (req, res) => {
           orderItemsMap[d.orderNo] = d.deliveryItems || [];
       });
 
-      planDocsChunk.forEach((plan) => {
+      let plansToReport = planDocsChunk;
+      if (pendingOnly) {
+        // Every Pending order gets rows: its saved plan rows when it has some (partly planned),
+        // otherwise its uploaded items as unplanned rows (blank plan dates and Plan Type).
+        const planByOrderNo = {};
+        planDocsChunk.forEach((p) => (planByOrderNo[p.orderNo] = p));
+        plansToReport = chunkOrderNos.map((no) => {
+          const saved = planByOrderNo[no];
+          if (saved && Array.isArray(saved[dept]) && saved[dept].length > 0)
+            return saved;
+          return {
+            ...(saved || { orderNo: no }),
+            [dept]: (uploadedItemsMap[no] || []).map((itemData) => ({
+              itemData,
+            })),
+          };
+        });
+      }
+
+      plansToReport.forEach((plan) => {
         planDocOrderNos.add(plan.orderNo);
         const items = plan[dept] || [];
 
@@ -2076,6 +2119,7 @@ router.get("/report-download/:dept", async (req, res) => {
     }
 
     // 3. Include pure Pending items (only for Delivery) in Chunks
+    // (In the Pending report every order already got its rows in step 2, so nothing is left here.)
     if (dept === "delivery") {
       const pendingOrderNos = orderNos.filter((no) => !planDocOrderNos.has(no));
 
@@ -2281,7 +2325,11 @@ router.get("/report-download/:dept", async (req, res) => {
       }
     }
 
-    XLSX.utils.book_append_sheet(wb, ws, `${dept}_Report`);
+    XLSX.utils.book_append_sheet(
+      wb,
+      ws,
+      pendingOnly ? `${dept}_Pending` : `${dept}_Report`,
+    );
 
     const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
 
@@ -2292,14 +2340,14 @@ router.get("/report-download/:dept", async (req, res) => {
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${dept.toUpperCase()}_Report_${dateStr}.xlsx"`,
+      `attachment; filename="${dept.toUpperCase()}_${pendingOnly ? "Pending_" : ""}Report_${dateStr}.xlsx"`,
     );
     res.send(buf);
   } catch (error) {
     console.error("Report download error:", error);
     res.status(500).json({ message: "Error generating report" });
   }
-});
+}
 
 // ==========================================
 // GET /api/orders/tracking-download/:dept — Download tracking report as Excel
